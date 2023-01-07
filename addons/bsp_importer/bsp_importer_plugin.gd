@@ -5,6 +5,7 @@ class_name BSPImporterPlugin
 const UNIT_SCALE := 1.0 / 32.0
 # Documentation: https://docs.godotengine.org/en/latest/tutorials/plugins/editor/import_plugins.html
 
+
 func _get_importer_name():
 	return "bsp"
 
@@ -44,10 +45,18 @@ func _get_preset_name(preset):
 			return "Unknown"
 
 
-func _get_import_options(preset, _unknown_int):
-	match preset:
+func _get_import_options(_path : String, preset_index : int):
+	#add_import_option("material_path_pattern", "res://materials/{texture_name}_material.tres")
+	match preset_index:
 		Presets.DEFAULT:
-			return []
+			return [{
+				"name" : "material_path_pattern",
+				"default_value" : "res://materials/{texture_name}_material.tres"
+			},
+			{
+				"name" : "texture_material_rename",
+				"default_value" : { "texture_name1" : "res://material/texture_name1_material.tres" }
+			}]
 		_:
 			return []
 
@@ -68,6 +77,33 @@ class BSPEdge:
 		return get_data_size()
 
 
+class BSPModelData:
+	var bound_min : Vector3
+	var bound_max : Vector3
+	var origin : Vector3
+	var node_id0 : int
+	var node_id1 : int
+	var node_id2 : int
+	var node_id3 : int
+	var num_leafs : int
+	var face_index : int
+	var face_count : int
+	static func get_data_size() -> int:
+		return 2 * 3 * 4 + 3 * 4 + 7 * 4
+	func read_model(file : FileAccess):
+		bound_min = Vector3(file.get_float(), file.get_float(), file.get_float())
+		bound_max = Vector3(file.get_float(), file.get_float(), file.get_float())
+		origin = Vector3(file.get_float(), file.get_float(), file.get_float())
+		node_id0 = file.get_32()
+		node_id1 = file.get_32()
+		node_id2 = file.get_32()
+		node_id3 = file.get_32()
+		num_leafs = file.get_32()
+		face_index = file.get_32()
+		face_count = file.get_32()
+		#print("origin: ", origin, "face_index: ", face_index, "face_count: ", face_count)
+
+
 class BSPTexture:
 	var name : String
 	var width : int
@@ -75,12 +111,18 @@ class BSPTexture:
 	var material : Material
 	static func get_data_size() -> int:
 		return 40 # 16 + 4 * 6
-	func read_texture(file : FileAccess) -> int:
+	func read_texture(file : FileAccess, material_path_pattern : String, texture_material_rename : Dictionary) -> int:
 		name = file.get_buffer(16).get_string_from_ascii()
 		width = file.get_32()
 		height = file.get_32()
 		print("texture: ", name, " width: ", width, " height: ", height)
-		material = load("res://materials/%s_material.tres" % name)
+		#material = load("res://materials/%s_material.tres" % name)
+		var material_path : String
+		if (texture_material_rename.has(name)):
+			material_path = texture_material_rename[name]
+		else:
+			material_path = material_path_pattern.replace("{texture_name}", name)
+		material = load(material_path)
 		if (!material):
 			material = StandardMaterial3D.new()
 			material.albedo_color = Color(randf_range(0.0, 1.0), randf_range(0.0, 1.0), randf_range(0.0, 1.0))
@@ -163,7 +205,10 @@ static func read_vector_convert_unscaled(file : FileAccess) -> Vector3:
 
 func _import(source_file : String, save_path : String, options, r_platform_variants, r_gen_files):
 	print("Attempting to import %s" % source_file)
-	var file = FileAccess.open(source_file, FileAccess.READ)
+	#print("Options: ", options)
+	var material_path_pattern : String = options["material_path_pattern"]
+	print("Material path pattern: ", material_path_pattern)
+	var file := FileAccess.open(source_file, FileAccess.READ)
 
 	if (!file):
 		var error := FileAccess.get_open_error()
@@ -279,7 +324,7 @@ func _import(source_file : String, save_path : String, options, r_platform_varia
 			var complete_offset := textures_offset + texture_offset
 			file.seek(complete_offset)
 			textures[i] = BSPTexture.new()
-			textures[i].read_texture(file)
+			textures[i].read_texture(file, material_path_pattern, options.texture_material_rename)
 		#print("texture: ", textures[i].name, " ", textures[i].width, "x", textures[i].height)
 
 	# UV stuff
@@ -292,8 +337,16 @@ func _import(source_file : String, save_path : String, options, r_platform_varia
 		textureinfos[i].read_texture_info(file)
 		#print("Textureinfo: ", textureinfos[i].vec_s, " ", textureinfos[i].offset_s, " ", textureinfos[i].vec_t, " ", textureinfos[i].offset_t, " ", textureinfos[i].texture_index)
 
-	#print("faces_offset: ", faces_offset)
-	#print("faces_size: ", faces_size)
+	# Get model data:
+	var model_data_size := BSPModelData.get_data_size()
+	var num_models := models_size / model_data_size
+	var model_data := []
+	model_data.resize(num_models)
+	for i in num_models:
+		model_data[i] = BSPModelData.new()
+		file.seek(models_offset + model_data_size * i) # We'll skip around in the file loading data
+		model_data[i].read_model(file)
+
 	file.seek(faces_offset)
 	var face_data_left := faces_size
 	var bsp_face := BSPFace.new()
@@ -301,75 +354,80 @@ func _import(source_file : String, save_path : String, options, r_platform_varia
 	var previous_tex_name := "UNSET"
 	var surface_tools := {}
 	
-	while (face_data_left > 0):
-		# Read the face data from the file
-		face_data_left -= bsp_face.read_face(file)
-		# Get the texture from the face
-		var tex_info : BSPTextureInfo = textureinfos[bsp_face.texinfo_id]
-		var texture : BSPTexture = textures[tex_info.texture_index]
-		var surf_tool : SurfaceTool
-		if (surface_tools.has(texture.name)):
-			surf_tool = surface_tools[texture.name]
-		else:
-			surf_tool = SurfaceTool.new()
-			surf_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-			surf_tool.set_material(texture.material)
-			# TODO: Set material to a resource that matches the texture name.
-			surface_tools[texture.name] = surf_tool
-		
-		#print("plane id: ", bsp_face.plane_id)
-		#print("face edge count: ", bsp_face.num_edges)
-		var edge_list_index_start := bsp_face.edge_list_id
-		#print("edge list index start: ", edge_list_index_start)
-		var i := 0
-		var face_verts : PackedVector3Array
-		face_verts.resize(bsp_face.num_edges)
-		var face_normals : PackedVector3Array
-		face_normals.resize(bsp_face.num_edges)
-		var face_normal := plane_normals[bsp_face.plane_id]
-		if (bsp_face.side):
-			face_normal = -face_normal
-		
-		var vs := tex_info.vec_s
-		var vt := tex_info.vec_t
-		var s := tex_info.offset_s
-		var t := tex_info.offset_t
-		#print("texture_index: ", tex_info.texture_index)
-		
-		var tex_width : int = texture.width
-		var tex_height : int = texture.height
-		var tex_name : String = texture.name
-		if (previous_tex_name != tex_name):
-			previous_tex_name = tex_name
-		#print("width: ", tex_width, " height: ", tex_height)
-		var face_uvs : PackedVector2Array
-		face_uvs.resize(bsp_face.num_edges)
-		var tex_scale_x := 1.0 / (UNIT_SCALE * tex_width)
-		var tex_scale_y := 1.0 / (UNIT_SCALE * tex_height)
-		#print("normal: ", face_normal)
-		for edge_list_index in range(edge_list_index_start, edge_list_index_start + bsp_face.num_edges):
-		#for edge_list_index in range(edge_list_index_start + bsp_face.num_edges - 1, edge_list_index_start - 1, -1): # Need to go in reverse order
-			var vert_index_0 : int
-			var reverse_order := false
-			var edge_index := edge_list[edge_list_index]
-			if (edge_index < 0):
-				reverse_order = true
-				edge_index = -edge_index
-			
-			if (reverse_order): # Not sure which way this should be flipped to get correct tangents
-				vert_index_0 = edges[edge_index].vertex_index_1
-			else:
-				vert_index_0 = edges[edge_index].vertex_index_0
-			var vert := verts[vert_index_0]
-			#print("vert (%s): %d, " % ["r" if reverse_order else "f", vert_index_0], vert)
-			face_verts[i] = vert
-			face_normals[i] = face_normal
-			face_uvs[i].x = vert.dot(vs) * tex_scale_x + s / tex_width
-			face_uvs[i].y = vert.dot(vt) * tex_scale_y + t / tex_height
-			#print("vert: ", vert, " vs: ", vs, " d: ", vert.dot(vs), " vt: ", vt, " d: ", vert.dot(vt))
-			i += 1
-		surf_tool.add_triangle_fan(face_verts, face_uvs, [], [], face_normals)
-	#surf_tool.generate_normals()
+	for model_index in num_models:
+		if (model_index == 0): # Only import the worldspawn for now, since doors and triggers will just block movement
+			var bsp_model : BSPModelData = model_data[model_index]
+			var face_size := BSPFace.get_data_size()
+			file.seek(faces_offset + bsp_model.face_index * face_size)
+			var num_faces := bsp_model.face_count
+			for face_index in num_faces:
+				bsp_face.read_face(file)
+				# Get the texture from the face
+				var tex_info : BSPTextureInfo = textureinfos[bsp_face.texinfo_id]
+				var texture : BSPTexture = textures[tex_info.texture_index]
+				var surf_tool : SurfaceTool
+				if (surface_tools.has(texture.name)):
+					surf_tool = surface_tools[texture.name]
+				else:
+					surf_tool = SurfaceTool.new()
+					surf_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+					surf_tool.set_material(texture.material)
+					# TODO: Set material to a resource that matches the texture name.
+					surface_tools[texture.name] = surf_tool
+				
+				#print("plane id: ", bsp_face.plane_id)
+				#print("face edge count: ", bsp_face.num_edges)
+				var edge_list_index_start := bsp_face.edge_list_id
+				#print("edge list index start: ", edge_list_index_start)
+				var i := 0
+				var face_verts : PackedVector3Array
+				face_verts.resize(bsp_face.num_edges)
+				var face_normals : PackedVector3Array
+				face_normals.resize(bsp_face.num_edges)
+				var face_normal := plane_normals[bsp_face.plane_id]
+				if (bsp_face.side):
+					face_normal = -face_normal
+				
+				var vs := tex_info.vec_s
+				var vt := tex_info.vec_t
+				var s := tex_info.offset_s
+				var t := tex_info.offset_t
+				#print("texture_index: ", tex_info.texture_index)
+				
+				var tex_width : int = texture.width
+				var tex_height : int = texture.height
+				var tex_name : String = texture.name
+				if (previous_tex_name != tex_name):
+					previous_tex_name = tex_name
+				#print("width: ", tex_width, " height: ", tex_height)
+				var face_uvs : PackedVector2Array
+				face_uvs.resize(bsp_face.num_edges)
+				var tex_scale_x := 1.0 / (UNIT_SCALE * tex_width)
+				var tex_scale_y := 1.0 / (UNIT_SCALE * tex_height)
+				#print("normal: ", face_normal)
+				for edge_list_index in range(edge_list_index_start, edge_list_index_start + bsp_face.num_edges):
+				#for edge_list_index in range(edge_list_index_start + bsp_face.num_edges - 1, edge_list_index_start - 1, -1): # Need to go in reverse order
+					var vert_index_0 : int
+					var reverse_order := false
+					var edge_index := edge_list[edge_list_index]
+					if (edge_index < 0):
+						reverse_order = true
+						edge_index = -edge_index
+					
+					if (reverse_order): # Not sure which way this should be flipped to get correct tangents
+						vert_index_0 = edges[edge_index].vertex_index_1
+					else:
+						vert_index_0 = edges[edge_index].vertex_index_0
+					var vert := verts[vert_index_0]
+					#print("vert (%s): %d, " % ["r" if reverse_order else "f", vert_index_0], vert)
+					face_verts[i] = vert
+					face_normals[i] = face_normal
+					face_uvs[i].x = vert.dot(vs) * tex_scale_x + s / tex_width
+					face_uvs[i].y = vert.dot(vt) * tex_scale_y + t / tex_height
+					#print("vert: ", vert, " vs: ", vs, " d: ", vert.dot(vs), " vt: ", vt, " d: ", vert.dot(vt))
+					i += 1
+				surf_tool.add_triangle_fan(face_verts, face_uvs, [], [], face_normals)
+			#surf_tool.generate_normals()
 	
 	var mesh_instance := MeshInstance3D.new()
 	
