@@ -2,9 +2,7 @@ extends Node
 
 class_name BSPReader
 
-# NOTE: To use convex collision, engine needs to support compute_convex_mesh_points
-# Set this to false and replace the [] with the compute_convex_mesh_points call in create_collision_shapes to get proper convex shapes
-const USE_TRIANGLE_COLLISION := true
+const USE_TRIANGLE_COLLISION := false # To use convex collision, engine needs to support compute_convex_mesh_points
 const UNIT_SCALE := 1.0 / 32.0
 # Documentation: https://docs.godotengine.org/en/latest/tutorials/plugins/editor/import_plugins.html
 
@@ -217,8 +215,21 @@ static func unsigned32_to_signed(unsigned : int) -> int:
 
 
 # Converts Z up to Y up
+#static func convert_vector_from_quake_unscaled(quake_vector : Vector3) -> Vector3:
+#	return Vector3(quake_vector.x, quake_vector.z, -quake_vector.y)
+
+
+#static func convert_vector_from_quake_scaled(quake_vector : Vector3) -> Vector3:
+#	return Vector3(quake_vector.x, quake_vector.z, -quake_vector.y) * UNIT_SCALE
+
+
+# X is forward in Quake, -Z is forward in Godot.  Z is up in Quake, Y is up in Godot
 static func convert_vector_from_quake_unscaled(quake_vector : Vector3) -> Vector3:
-	return Vector3(quake_vector.x, quake_vector.z, -quake_vector.y)
+	return Vector3(-quake_vector.y, quake_vector.z, -quake_vector.x)
+
+
+static func convert_vector_from_quake_scaled(quake_vector : Vector3) -> Vector3:
+	return Vector3(-quake_vector.y, quake_vector.z, -quake_vector.x) * UNIT_SCALE
 
 
 static func read_vector_convert_unscaled(file : FileAccess) -> Vector3:
@@ -229,6 +240,7 @@ var error := ERR_UNCONFIGURED
 var material_path_pattern : String
 var water_template_path : String
 var texture_material_rename : Dictionary
+var entity_remap : Dictionary
 var array_of_planes_array := []
 var array_of_planes : PackedInt32Array = []
 var water_planes_array := []  # Array of arrays of planes
@@ -238,6 +250,7 @@ var nodes_offset : int
 var root_node : Node3D
 var plane_normals : PackedVector3Array
 var plane_distances : PackedFloat32Array
+var model_scenes : Dictionary = {}
 
 
 func clear_data():
@@ -251,6 +264,7 @@ func clear_data():
 	root_node = null
 	plane_normals = []
 	plane_distances = []
+	model_scenes = {}
 
 
 func read_bsp(source_file : String) -> Node:
@@ -338,6 +352,14 @@ func read_bsp(source_file : String) -> Node:
 	for i in vertex_count:
 		verts[i] = convert_vector_from_quake_unscaled(Vector3(file.get_float(), file.get_float(), file.get_float())) * UNIT_SCALE
 		#print("Vert: ", verts[i])
+
+	# Read entity data
+	file.seek(entity_offset)
+	var entity_string : String = file.get_buffer(entity_size).get_string_from_ascii()
+	print("Entity data: ", entity_string)
+	var entity_dict_array := parse_entity_string(entity_string)
+	convert_entity_dict_to_scene(entity_dict_array)
+	
 
 	#print("edges_offset: ", edges_offset)
 	file.seek(edges_offset)
@@ -436,10 +458,22 @@ func read_bsp(source_file : String) -> Node:
 	var bsp_face := BSPFace.new()
 	var begun := false
 	var previous_tex_name := "UNSET"
-	var surface_tools := {}
 
 	for model_index in num_models:
-		if (model_index == 0): # Only import the worldspawn for now, since doors and triggers will just block movement
+		var surface_tools := {}
+		var needs_import := false
+		var parent_node : Node
+		if (model_index == 0):
+			needs_import = true # Always import worldspawn.
+			var static_body := StaticBody3D.new()
+			static_body.name = "static_body"
+			root_node.add_child(static_body)
+			static_body.owner = root_node
+			parent_node = static_body
+		if (model_scenes.has(model_index)):
+			needs_import = true # Import supported entities.
+			parent_node = model_scenes[model_index]
+		if (needs_import): # Only import the worldspawn for now, since doors and triggers will just block movement
 			var bsp_model : BSPModelData = model_data[model_index]
 			var face_size := BSPFace.get_data_size_q1bsp() if !is_bsp2 else BSPFace.get_data_size_bsp2()
 			file.seek(faces_offset + bsp_model.face_index * face_size)
@@ -542,7 +576,7 @@ func read_bsp(source_file : String) -> Node:
 					array_mesh = surf_tool.commit(array_mesh)
 					mesh_instance.mesh = array_mesh
 					mesh_instance.name = "transparent_mesh"
-					root_node.add_child(mesh_instance)
+					parent_node.add_child(mesh_instance)
 					mesh_instance.owner = root_node
 	
 			# Put all non-transparent textures into a single mesh
@@ -557,7 +591,7 @@ func read_bsp(source_file : String) -> Node:
 				array_mesh = surf_tool.commit(array_mesh)
 			mesh_instance.mesh = array_mesh
 			mesh_instance.name = "mesh"
-			root_node.add_child(mesh_instance)
+			parent_node.add_child(mesh_instance)
 			mesh_instance.owner = root_node
 			#print("face_data_left: ", face_data_left)
 
@@ -567,14 +601,13 @@ func read_bsp(source_file : String) -> Node:
 				var collision_shape := CollisionShape3D.new()
 				collision_shape.name = "collision_shape"
 				collision_shape.shape = mesh_instance.mesh.create_trimesh_shape()
-				var static_body := StaticBody3D.new()
-				static_body.name = "static_body"
-				root_node.add_child(static_body)
-				static_body.owner = root_node
-				static_body.add_child(collision_shape)
+				parent_node.add_child(collision_shape)
 				collision_shape.owner = root_node
 				# Apparently we have to let the gc handle this autamically now: file.close()
 			else: # Attempt to create collision out of BSP nodes
+				# Clear these out, as we may be importing multiple models.
+				array_of_planes_array = []
+				array_of_planes = []
 				if (0): # Clipnodes -- these are lossy and account for player size
 					print("Node 0: ", bsp_model.node_id0, " Node 1: ", bsp_model.node_id1, " Node 2: ", bsp_model.node_id2, " Node 3: ", bsp_model.node_id3)
 					file.seek(clipnodes_offset + bsp_model.node_id0 * CLIPNODES_STRUCT_SIZE) # Not sure which node I should be using here.  I think 0 is for rendering and 1 is point collision.
@@ -582,13 +615,9 @@ func read_bsp(source_file : String) -> Node:
 					read_clipnodes_recursive(file, clipnodes_offset)
 				else:
 					print("Reading nodes: ", nodes_offset)
-					file.seek(nodes_offset)
+					file.seek(nodes_offset + bsp_model.node_id0 * NODES_STRUCT_SIZE)
 					read_nodes_recursive()
 				#print("Array of planes array: ", array_of_planes_array)
-				var static_body := StaticBody3D.new()
-				static_body.name = "static_body"
-				root_node.add_child(static_body)
-				static_body.owner = root_node
 				var model_mins := Vector3(-300, -300, -300) # TODO: Actual mins and maxs
 				var model_maxs := Vector3(300, 300, 300)
 				var model_mins_maxs_planes : Array[Plane]
@@ -600,17 +629,118 @@ func read_bsp(source_file : String) -> Node:
 				model_mins_maxs_planes.push_back(Plane(Vector3.FORWARD, -model_mins.z))
 
 				# Create collision shapes for world
-				create_collision_shapes(static_body, array_of_planes_array)
+				create_collision_shapes(parent_node, array_of_planes_array)
 
 				# Create collision shapes for water, if we have any
 				if (water_planes_array.size() > 0):
 					var water_body : Node = load(water_template_path).instantiate()
-					root_node.add_child(water_body)
+					parent_node.add_child(water_body)
 					water_body.owner = root_node
 					create_collision_shapes(water_body, water_planes_array)
 	file.close()
 	file = null
 	return root_node
+
+
+func parse_entity_string(entity_string : String) -> Array:
+	var ent_dict := {}
+	var ent_dict_array := []
+	var in_key_string := false
+	var in_value_string := false
+	var key : String
+	var value : String
+	var parsed_key := false
+	for char in entity_string:
+		if (in_key_string):
+			if (char == '"'):
+				in_key_string = false
+				parsed_key = true
+			else:
+				key += char
+		elif (in_value_string):
+			if (char == '"'):
+				in_value_string = false
+				ent_dict[key] = value
+				key = ""
+				value = ""
+				parsed_key = false
+			else:
+				value += char
+		elif (char == '"'):
+			if (parsed_key):
+				in_value_string = true
+			else:
+				in_key_string = true
+		elif (char == '}'):
+			ent_dict_array.push_back(ent_dict)
+		elif (char == '{'):
+			ent_dict = {}
+			parsed_key = false
+	print("ent dict: ", ent_dict_array)
+	return ent_dict_array
+
+
+func convert_entity_dict_to_scene(ent_dict_array : Array):
+	for ent_dict in ent_dict_array:
+		if (ent_dict.has("classname")):
+			var classname : String = ent_dict["classname"]
+			print("Classname: ", classname)
+			if (entity_remap.has(classname)):
+				var scene_path : String = entity_remap[classname]
+				print("Remapping ", classname, " to ", scene_path)
+				var scene_resource = load(scene_path)
+				if (!scene_resource):
+					print("Failed to load ", scene_path)
+				else:
+					var scene : Node = scene_resource.instantiate()
+					if (!scene):
+						print("Failed to instantiate scene: ", scene_path)
+					else:
+						var origin := Vector3.ZERO
+						if (ent_dict.has("origin")):
+							var origin_string : String = ent_dict["origin"]
+							origin = string_to_origin(origin_string)
+						var basis := mangle_to_basis(ent_dict.get("mangle", "")) # Always want to call this as Quake entities are 90 degrees off from Godot
+						var transform := Transform3D(basis, origin)
+						root_node.add_child(scene)
+						scene.transform = transform
+						scene.owner = root_node
+						if (ent_dict.has("model")):
+							var model_value : String = ent_dict["model"]
+							# Models that start with a * are contained with in the BSP file (ex: doors, triggers, etc)
+							if (model_value[0] == '*'):
+								model_scenes[model_value.substr(1).to_int()] = scene
+						# For every key/value pair in the entity, see if there's a corresponding
+						# variable in the gdscript and set it.
+						for key in ent_dict:
+							scene.set(key, ent_dict[key])
+	print("model_scenes: ", model_scenes)
+
+
+static func string_to_origin(origin_string : String) -> Vector3:
+	var vec := Vector3.ZERO
+	var split := origin_string.split(" ")
+	var i := 0
+	for pos in split:
+		if (i < 3):
+			vec[i] = pos.to_float()
+		i += 1
+	return convert_vector_from_quake_scaled(vec)
+
+
+static func mangle_to_basis(mangle_string : String) -> Basis:
+	var split := mangle_string.split(" ")
+	var angles := Vector3.ZERO
+	var i := 0
+	for pos in split:
+		if (i < 3):
+			angles[i] = deg_to_rad(pos.to_float())
+		i += 1
+	#var angles_ypr := Vector3(angles[1], angles[0], angles[2])
+	#angles[1] -= PI * 0.5 # In Quake, X is forward (0 degrees).  In Godot, -Z is forward.
+	angles[0] = - angles[0] # For some reason pitch is invertid in quake mangles
+	var basis := Basis.from_euler(angles)
+	return basis
 
 
 func create_collision_shapes(body : Node3D, planes_array):
@@ -623,7 +753,7 @@ func create_collision_shapes(body : Node3D, planes_array):
 			var plane := Plane(plane_normals[abs(plane_index) - 1] * sign(plane_index), (plane_distances[abs(plane_index) - 1]) * sign(plane_index))
 			convex_planes.push_back(plane)
 			#print("Plane ", plane_index, ": ", plane)
-		var convex_points : PackedVector3Array = [] # Geometry3D.compute_convex_mesh_points(convex_planes)
+		var convex_points := convert_planes_to_points(convex_planes)
 		var collision_shape := CollisionShape3D.new()
 		#print("Convex planes: ", convex_planes)
 		collision_shape.name = "collision%d" % i
@@ -684,3 +814,16 @@ func handle_clip_child(file : FileAccess, clipnodes_offset : int, child_value : 
 	else:
 		file.seek(clipnodes_offset + child_value * CLIPNODES_STRUCT_SIZE)
 		read_clipnodes_recursive(file, clipnodes_offset)
+
+
+func convert_planes_to_points(convex_planes : Array[Plane]) -> PackedVector3Array :
+	# If you get errors about this, you're using a godot version that doesn't have this 
+	# function exposed, yet.  Comment it out and uncomment the code below.
+	#return Geometry3D.compute_convex_mesh_points(convex_planes)
+	var clipper := BspClipper.new()
+	clipper.begin()
+	for plane in convex_planes:
+		clipper.clip_plane(plane)
+	clipper.filter_and_clean()
+	
+	return clipper.vertices

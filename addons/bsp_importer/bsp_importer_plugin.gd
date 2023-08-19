@@ -55,6 +55,10 @@ func _get_import_options(_path : String, preset_index : int):
 			{
 				"name" : "water_scene_template",
 				"default_value" : "res://addons/bsp_importer/water_example_template.tscn"
+			},
+			{
+				"name" : "entity_remap",
+				"default_value" : { "trigger_example" : "res://triggers/trigger_example.tres" }
 			}]
 		_:
 			return []
@@ -68,6 +72,7 @@ func _import(source_file : String, save_path : String, options, r_platform_varia
 	var bsp_reader := BSPReader.new()
 	bsp_reader.material_path_pattern = options["material_path_pattern"]
 	bsp_reader.water_template_path = options["water_scene_template"]
+	bsp_reader.entity_remap = options.entity_remap
 	bsp_reader.texture_material_rename = options.texture_material_rename
 
 	var bsp_scene := bsp_reader.read_bsp(source_file)
