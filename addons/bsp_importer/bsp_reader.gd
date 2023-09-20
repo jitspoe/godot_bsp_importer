@@ -253,7 +253,7 @@ var model_scenes : Dictionary = {}
 
 var _unit_scale: float = 1.0
 
-var inverse_scale_fac: float = 16.0:
+var inverse_scale_fac: float = 32.0:
 	set(v):
 		inverse_scale_fac = v
 		_unit_scale = 1.0 / v
