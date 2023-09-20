@@ -461,18 +461,21 @@ func read_bsp(source_file : String) -> Node:
 
 	for model_index in num_models:
 		var surface_tools := {}
+		water_planes_array = [] # Clear that out so water isn't duplicated for each mesh. :D
 		var needs_import := false
-		var parent_node : Node
-		if (model_index == 0):
+		var parent_node : Node3D
+		var parent_inv_transform := Transform3D() # If a world model is rotated (such as a trigger) we want to keep things in the correct spot
+		if (model_index == 0): # worldspawn
 			needs_import = true # Always import worldspawn.
 			var static_body := StaticBody3D.new()
 			static_body.name = "static_body"
-			root_node.add_child(static_body)
+			root_node.add_child(static_body, true)
 			static_body.owner = root_node
 			parent_node = static_body
 		if (model_scenes.has(model_index)):
 			needs_import = true # Import supported entities.
 			parent_node = model_scenes[model_index]
+			parent_inv_transform = parent_node.transform.inverse()
 		if (needs_import): # Only import the worldspawn for now, since doors and triggers will just block movement
 			var bsp_model : BSPModelData = model_data[model_index]
 			var face_size := BSPFace.get_data_size_q1bsp() if !is_bsp2 else BSPFace.get_data_size_bsp2()
@@ -576,7 +579,8 @@ func read_bsp(source_file : String) -> Node:
 					array_mesh = surf_tool.commit(array_mesh)
 					mesh_instance.mesh = array_mesh
 					mesh_instance.name = "transparent_mesh"
-					parent_node.add_child(mesh_instance)
+					parent_node.add_child(mesh_instance, true)
+					mesh_instance.transform = parent_inv_transform
 					mesh_instance.owner = root_node
 	
 			# Put all non-transparent textures into a single mesh
@@ -591,7 +595,8 @@ func read_bsp(source_file : String) -> Node:
 				array_mesh = surf_tool.commit(array_mesh)
 			mesh_instance.mesh = array_mesh
 			mesh_instance.name = "mesh"
-			parent_node.add_child(mesh_instance)
+			parent_node.add_child(mesh_instance, true)
+			mesh_instance.transform = parent_inv_transform
 			mesh_instance.owner = root_node
 			#print("face_data_left: ", face_data_left)
 
@@ -601,7 +606,8 @@ func read_bsp(source_file : String) -> Node:
 				var collision_shape := CollisionShape3D.new()
 				collision_shape.name = "collision_shape"
 				collision_shape.shape = mesh_instance.mesh.create_trimesh_shape()
-				parent_node.add_child(collision_shape)
+				parent_node.add_child(collision_shape, true)
+				mesh_instance.transform = parent_inv_transform
 				collision_shape.owner = root_node
 				# Apparently we have to let the gc handle this autamically now: file.close()
 			else: # Attempt to create collision out of BSP nodes
@@ -629,14 +635,15 @@ func read_bsp(source_file : String) -> Node:
 				model_mins_maxs_planes.push_back(Plane(Vector3.FORWARD, -model_mins.z))
 
 				# Create collision shapes for world
-				create_collision_shapes(parent_node, array_of_planes_array)
+				create_collision_shapes(parent_node, array_of_planes_array, parent_inv_transform)
 
 				# Create collision shapes for water, if we have any
 				if (water_planes_array.size() > 0):
 					var water_body : Node = load(water_template_path).instantiate()
-					parent_node.add_child(water_body)
+					parent_node.add_child(water_body, true)
+					water_body.transform = parent_inv_transform
 					water_body.owner = root_node
-					create_collision_shapes(water_body, water_planes_array)
+					create_collision_shapes(water_body, water_planes_array, Transform3D())
 	file.close()
 	file = null
 	return root_node
@@ -700,9 +707,15 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 						if (ent_dict.has("origin")):
 							var origin_string : String = ent_dict["origin"]
 							origin = string_to_origin(origin_string)
-						var basis := mangle_to_basis(ent_dict.get("mangle", "")) # Always want to call this as Quake entities are 90 degrees off from Godot
+						var mangle_string : String = ent_dict.get("mangle", "")
+						var angle_string : String = ent_dict.get("angle", "")
+						var basis := Basis()
+						if (angle_string.length() > 0):
+							basis = angle_to_basis(angle_string)
+						if (mangle_string.length() > 0):
+							basis = mangle_to_basis(mangle_string)
 						var transform := Transform3D(basis, origin)
-						root_node.add_child(scene)
+						root_node.add_child(scene, true)
 						scene.transform = transform
 						scene.owner = root_node
 						if (ent_dict.has("model")):
@@ -713,19 +726,50 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 						# For every key/value pair in the entity, see if there's a corresponding
 						# variable in the gdscript and set it.
 						for key in ent_dict:
-							scene.set(key, ent_dict[key])
+							var string_value : String = ent_dict[key]
+							var value = string_value
+							if (key == "spawnflags"):
+								value = value.to_int()
+							var dest_value = scene.get(key) # Se if we can figure out the type of the destination value
+							if (dest_value != null):
+								var dest_type := typeof(dest_value)
+								match (dest_type):
+									TYPE_BOOL:
+										value = string_value.to_int() != 0
+									TYPE_INT:
+										value = string_value.to_int()
+									TYPE_FLOAT:
+										value = string_value.to_float()
+									TYPE_STRING:
+										value = string_value
+									TYPE_VECTOR3:
+										value = string_to_vector3(string_value)
+									_:
+										print("Key value type not handled for ", key, " : ", dest_type)
+
+							# Allow scenes to have custom implementations of this so they can remap values or whatever
+							if (scene.has_method("set_import_value")):
+								scene.set_import_value(key, string_value)
+							else:
+								scene.set(key, value)
+							
 	print("model_scenes: ", model_scenes)
 
 
 static func string_to_origin(origin_string : String) -> Vector3:
+	var vec := string_to_vector3(origin_string)
+	return convert_vector_from_quake_scaled(vec)
+
+
+static func string_to_vector3(vec_string : String) -> Vector3:
 	var vec := Vector3.ZERO
-	var split := origin_string.split(" ")
+	var split := vec_string.split(" ")
 	var i := 0
 	for pos in split:
 		if (i < 3):
 			vec[i] = pos.to_float()
 		i += 1
-	return convert_vector_from_quake_scaled(vec)
+	return vec
 
 
 static func mangle_to_basis(mangle_string : String) -> Basis:
@@ -743,7 +787,14 @@ static func mangle_to_basis(mangle_string : String) -> Basis:
 	return basis
 
 
-func create_collision_shapes(body : Node3D, planes_array):
+static func angle_to_basis(angle_string : String) -> Basis:
+	var angles := Vector3.ZERO
+	angles[1] = deg_to_rad(angle_string.to_float())
+	var basis := Basis.from_euler(angles)
+	return basis
+
+
+func create_collision_shapes(body : Node3D, planes_array, parent_inv_transform : Transform3D):
 	for i in planes_array.size():
 		var plane_indexes : PackedInt32Array = planes_array[i]
 		var convex_planes : Array[Plane]
@@ -759,8 +810,9 @@ func create_collision_shapes(body : Node3D, planes_array):
 		collision_shape.name = "collision%d" % i
 		collision_shape.shape = ConvexPolygonShape3D.new()
 		collision_shape.shape.points = convex_points
+		collision_shape.transform = parent_inv_transform
 		#print("Convex points: ", convex_points)
-		body.add_child(collision_shape)
+		body.add_child(collision_shape, true)
 		collision_shape.owner = root_node
 
 
