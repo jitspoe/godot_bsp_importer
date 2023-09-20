@@ -3,7 +3,6 @@ extends Node
 class_name BSPReader
 
 const USE_TRIANGLE_COLLISION := false # To use convex collision, engine needs to support compute_convex_mesh_points
-const UNIT_SCALE := 1.0 / 32.0
 # Documentation: https://docs.godotengine.org/en/latest/tutorials/plugins/editor/import_plugins.html
 
 
@@ -228,8 +227,8 @@ static func convert_vector_from_quake_unscaled(quake_vector : Vector3) -> Vector
 	return Vector3(-quake_vector.y, quake_vector.z, -quake_vector.x)
 
 
-static func convert_vector_from_quake_scaled(quake_vector : Vector3) -> Vector3:
-	return Vector3(-quake_vector.y, quake_vector.z, -quake_vector.x) * UNIT_SCALE
+static func convert_vector_from_quake_scaled(quake_vector : Vector3, scale: float) -> Vector3:
+	return Vector3(-quake_vector.y, quake_vector.z, -quake_vector.x) * scale
 
 
 static func read_vector_convert_unscaled(file : FileAccess) -> Vector3:
@@ -251,6 +250,13 @@ var root_node : Node3D
 var plane_normals : PackedVector3Array
 var plane_distances : PackedFloat32Array
 var model_scenes : Dictionary = {}
+
+var _unit_scale: float = 1.0
+
+var inverse_scale_fac: float = 32.0:
+	set(v):
+		inverse_scale_fac = v
+		_unit_scale = 1.0 / v
 
 
 func clear_data():
@@ -350,7 +356,7 @@ func read_bsp(source_file : String) -> Node:
 	var vertex_count := verts_size / (4 * 3)
 	verts.resize(vertex_count)
 	for i in vertex_count:
-		verts[i] = convert_vector_from_quake_unscaled(Vector3(file.get_float(), file.get_float(), file.get_float())) * UNIT_SCALE
+		verts[i] = convert_vector_from_quake_scaled(Vector3(file.get_float(), file.get_float(), file.get_float()), _unit_scale)
 		#print("Vert: ", verts[i])
 
 	# Read entity data
@@ -393,7 +399,7 @@ func read_bsp(source_file : String) -> Node:
 	for i in num_planes:
 		var quake_plane_normal := Vector3(file.get_float(), file.get_float(), file.get_float())
 		plane_normals[i] = convert_vector_from_quake_unscaled(quake_plane_normal)
-		plane_distances[i] = file.get_float() * UNIT_SCALE
+		plane_distances[i] = file.get_float() * _unit_scale
 		var _type = file.get_32() # 0 = X-Axial plane, 1 = Y-axial pane, 2 = z-axial plane, 3 nonaxial, toward x, 4 y, 5 z
 		#print("Quake plane ", i, ": ", quake_plane_normal, " dist: ", plane_distances[i], " type: ", _type)
 	#print("plane_normals: ", plane_normals)
@@ -544,8 +550,8 @@ func read_bsp(source_file : String) -> Node:
 				#print("width: ", tex_width, " height: ", tex_height)
 				var face_uvs : PackedVector2Array
 				face_uvs.resize(bsp_face.num_edges)
-				var tex_scale_x := 1.0 / (UNIT_SCALE * tex_width)
-				var tex_scale_y := 1.0 / (UNIT_SCALE * tex_height)
+				var tex_scale_x := 1.0 / (_unit_scale * tex_width)
+				var tex_scale_y := 1.0 / (_unit_scale * tex_height)
 				#print("normal: ", face_normal)
 				for edge_list_index in range(edge_list_index_start, edge_list_index_start + bsp_face.num_edges):
 				#for edge_list_index in range(edge_list_index_start + bsp_face.num_edges - 1, edge_list_index_start - 1, -1): # Need to go in reverse order
@@ -706,7 +712,7 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 						var origin := Vector3.ZERO
 						if (ent_dict.has("origin")):
 							var origin_string : String = ent_dict["origin"]
-							origin = string_to_origin(origin_string)
+							origin = string_to_origin(origin_string, _unit_scale)
 						var mangle_string : String = ent_dict.get("mangle", "")
 						var angle_string : String = ent_dict.get("angle", "")
 						var basis := Basis()
@@ -756,9 +762,9 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 	print("model_scenes: ", model_scenes)
 
 
-static func string_to_origin(origin_string : String) -> Vector3:
+static func string_to_origin(origin_string : String, scale: float) -> Vector3:
 	var vec := string_to_vector3(origin_string)
-	return convert_vector_from_quake_scaled(vec)
+	return convert_vector_from_quake_scaled(vec, scale)
 
 
 static func string_to_vector3(vec_string : String) -> Vector3:

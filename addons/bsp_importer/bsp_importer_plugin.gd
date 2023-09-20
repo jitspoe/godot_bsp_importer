@@ -45,6 +45,10 @@ func _get_import_options(_path : String, preset_index : int):
 	match preset_index:
 		Presets.DEFAULT:
 			return [{
+				"name" : "inverse_scale_factor",
+				"default_value" : 32.0
+			},
+			{
 				"name" : "material_path_pattern",
 				"default_value" : "res://materials/{texture_name}_material.tres"
 			},
@@ -72,6 +76,7 @@ func _import(source_file : String, save_path : String, options, r_platform_varia
 	var bsp_reader := BSPReader.new()
 	bsp_reader.material_path_pattern = options["material_path_pattern"]
 	bsp_reader.water_template_path = options["water_scene_template"]
+	bsp_reader.inverse_scale_fac = options["inverse_scale_factor"]
 	bsp_reader.entity_remap = options.entity_remap
 	bsp_reader.texture_material_rename = options.texture_material_rename
 
