@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://c1sip6qdohlf8"]
 
-[node name="water_example_template" type="Area3D"]
+[node name="WaterExampleTemplate" type="Area3D"]
 gravity_space_override = 3
 gravity = 0.0
 linear_damp_space_override = 3

@@ -2,6 +2,7 @@
 extends EditorImportPlugin
 class_name BSPImporterPlugin
 
+
 func _get_importer_name():
 	return "bsp"
 
@@ -16,8 +17,11 @@ func _get_recognized_extensions():
 
 func _get_priority():
 	return 1.0
+
+
 func _get_import_order():
 	return 0
+
 
 func _get_save_extension():
 	return "scn"
@@ -28,6 +32,7 @@ func _get_resource_type():
 
 
 enum Presets { DEFAULT }
+
 
 func _get_preset_count():
 	return Presets.size()
