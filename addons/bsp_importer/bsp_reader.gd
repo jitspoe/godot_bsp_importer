@@ -69,20 +69,23 @@ class BSPModelData:
 	var num_leafs : int # For vis?
 	var face_index : int
 	var face_count : int
-	static func get_data_size() -> int:
-		return 2 * 3 * 4 + 3 * 4 + 7 * 4
-	func read_model(file : FileAccess):
-		bound_min = Vector3(file.get_float(), file.get_float(), file.get_float())
-		bound_max = Vector3(file.get_float(), file.get_float(), file.get_float())
-		origin = Vector3(file.get_float(), file.get_float(), file.get_float())
-		node_id0 = file.get_32()
-		node_id1 = file.get_32()
-		node_id2 = file.get_32()
-		node_id3 = file.get_32()
-		num_leafs = file.get_32()
-		face_index = file.get_32()
-		face_count = file.get_32()
-		#print("origin: ", origin, "face_index: ", face_index, "face_count: ", face_count)
+
+const MODEL_DATA_SIZE_Q1_BSP := 2 * 3 * 4 + 3 * 4 + 7 * 4
+
+func read_model_data_q1_bsp(model_data : BSPModelData):
+	# Since some axes are negated here, min/max is funky.
+	var mins := read_vector_convert_scaled()
+	var maxs := read_vector_convert_scaled()
+	model_data.bound_min = Vector3(min(mins.x, maxs.x), min(mins.y, maxs.y), min(mins.z, maxs.z))
+	model_data.bound_max = Vector3(max(mins.x, maxs.x), max(mins.y, maxs.y), max(mins.z, maxs.z))
+	model_data.origin = read_vector_convert_scaled()
+	model_data.node_id0 = file.get_32()
+	model_data.node_id1 = file.get_32()
+	model_data.node_id2 = file.get_32()
+	model_data.node_id3 = file.get_32()
+	model_data.num_leafs = file.get_32()
+	model_data.face_index = file.get_32()
+	model_data.face_count = file.get_32()
 
 
 class BSPModelDataQ2:
@@ -240,6 +243,10 @@ static func convert_vector_from_quake_scaled(quake_vector : Vector3, scale: floa
 
 static func read_vector_convert_unscaled(file : FileAccess) -> Vector3:
 	return convert_vector_from_quake_unscaled(Vector3(file.get_float(), file.get_float(), file.get_float()))
+
+
+func read_vector_convert_scaled() -> Vector3:
+	return convert_vector_from_quake_scaled(Vector3(file.get_float(), file.get_float(), file.get_float()), _unit_scale)
 
 
 var error := ERR_UNCONFIGURED
@@ -466,14 +473,19 @@ func read_bsp(source_file : String) -> Node:
 		#print("Textureinfo: ", textureinfos[i].vec_s, " ", textureinfos[i].offset_s, " ", textureinfos[i].vec_t, " ", textureinfos[i].offset_t, " ", textureinfos[i].texture_index)
 
 	# Get model data:
-	var model_data_size := BSPModelData.get_data_size() if !is_q2 else BSPModelDataQ2.get_data_size()
+	var model_data_size := MODEL_DATA_SIZE_Q1_BSP if !is_q2 else BSPModelDataQ2.get_data_size()
 	var num_models := models_size / model_data_size
 	var model_data := []
 	model_data.resize(num_models)
 	for i in num_models:
-		model_data[i] = BSPModelData.new() if !is_q2 else BSPModelDataQ2.get_data_size()
-		file.seek(models_offset + model_data_size * i) # We'll skip around in the file loading data
-		model_data[i].read_model(file)
+		if (is_q2):
+			model_data[i] = BSPModelDataQ2.new()
+			file.seek(models_offset + model_data_size * i) # We'll skip around in the file loading data
+			model_data[i].read_model(file)
+		else:
+			model_data[i] = BSPModelData.new()
+			file.seek(models_offset + model_data_size * i) # We'll skip around in the file loading data
+			read_model_data_q1_bsp(model_data[i])
 
 	file.seek(faces_offset)
 	var face_data_left := faces_size
@@ -646,8 +658,10 @@ func read_bsp(source_file : String) -> Node:
 					file.seek(seek_location)
 					read_nodes_recursive()
 				#print("Array of planes array: ", array_of_planes_array)
-				var model_mins := Vector3(-300, -300, -300) # TODO: Actual mins and maxs
-				var model_maxs := Vector3(300, 300, 300)
+				var model_mins := bsp_model.bound_min;
+				var model_maxs := bsp_model.bound_max;
+				print("Model mins: ", model_mins, " Model maxs: ", model_maxs)
+				print("Origin: ", bsp_model.origin)
 				var model_mins_maxs_planes : Array[Plane]
 				model_mins_maxs_planes.push_back(Plane(Vector3.RIGHT, model_maxs.x))
 				model_mins_maxs_planes.push_back(Plane(Vector3.UP, model_maxs.y))
@@ -657,7 +671,7 @@ func read_bsp(source_file : String) -> Node:
 				model_mins_maxs_planes.push_back(Plane(Vector3.FORWARD, -model_mins.z))
 
 				# Create collision shapes for world
-				create_collision_shapes(parent_node, array_of_planes_array, parent_inv_transform)
+				create_collision_shapes(parent_node, array_of_planes_array, model_mins_maxs_planes, parent_inv_transform)
 
 				# Create collision shapes for water, if we have any
 				if (water_planes_array.size() > 0):
@@ -665,7 +679,7 @@ func read_bsp(source_file : String) -> Node:
 					parent_node.add_child(water_body, true)
 					water_body.transform = parent_inv_transform
 					water_body.owner = root_node
-					create_collision_shapes(water_body, water_planes_array, Transform3D())
+					create_collision_shapes(water_body, water_planes_array, model_mins_maxs_planes, Transform3D())
 	file.close()
 	file = null
 	return root_node
@@ -755,8 +769,12 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 
 							# Allow scenes to have custom implementations of this so they can remap values or whatever
 							# Returning true means it was handled.
-							if (scene.has_method("set_import_value") && scene.set_import_value(key, string_value)):
-								continue
+							if (scene.has_method("set_import_value")):
+								if (!scene.get_script().is_tool()):
+									printerr(scene.name + " has 'set_import_value()' function but must have @tool set to work for imports.")
+								else:
+									if (scene.set_import_value(key, string_value)):
+										continue
 
 							var dest_value = scene.get(key) # Se if we can figure out the type of the destination value
 							if (dest_value != null):
@@ -770,10 +788,13 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 										value = string_value.to_float()
 									TYPE_STRING:
 										value = string_value
+									TYPE_STRING_NAME:
+										value = string_value
 									TYPE_VECTOR3:
 										value = string_to_vector3(string_value)
 									_:
-										print("Key value type not handled for ", key, " : ", dest_type)
+										printerr("Key value type not handled for ", key, " : ", dest_type)
+										value = string_value # Try setting it to the string value and hope for the best.
 							scene.set(key, value)
 							
 	print("model_scenes: ", model_scenes)
@@ -817,26 +838,31 @@ static func angle_to_basis(angle_string : String) -> Basis:
 	return basis
 
 
-func create_collision_shapes(body : Node3D, planes_array, parent_inv_transform : Transform3D):
+func create_collision_shapes(body : Node3D, planes_array, model_mins_maxs_planes, parent_inv_transform : Transform3D):
+	print("Create collision shapes.")
 	for i in planes_array.size():
 		var plane_indexes : PackedInt32Array = planes_array[i]
 		var convex_planes : Array[Plane]
-		#convex_planes.append_array(model_mins_maxs_planes)
+		#print("Planes index: ", i)
+		convex_planes.append_array(model_mins_maxs_planes)
 		for plane_index in plane_indexes:
 			# sign of 0 is 0, so we offset the index by 1.
 			var plane := Plane(plane_normals[abs(plane_index) - 1] * sign(plane_index), (plane_distances[abs(plane_index) - 1]) * sign(plane_index))
 			convex_planes.push_back(plane)
 			#print("Plane ", plane_index, ": ", plane)
 		var convex_points := convert_planes_to_points(convex_planes)
-		var collision_shape := CollisionShape3D.new()
-		#print("Convex planes: ", convex_planes)
-		collision_shape.name = "Collision%d" % i
-		collision_shape.shape = ConvexPolygonShape3D.new()
-		collision_shape.shape.points = convex_points
-		collision_shape.transform = parent_inv_transform
-		#print("Convex points: ", convex_points)
-		body.add_child(collision_shape, true)
-		collision_shape.owner = root_node
+		if (convex_points.size() < 3):
+			print("Convex shape creation failed ", i)
+		else:
+			var collision_shape := CollisionShape3D.new()
+			#print("Convex planes: ", convex_planes)
+			collision_shape.name = "Collision%d" % i
+			collision_shape.shape = ConvexPolygonShape3D.new()
+			collision_shape.shape.points = convex_points
+			collision_shape.transform = parent_inv_transform
+			#print("Convex points: ", convex_points)
+			body.add_child(collision_shape, true)
+			collision_shape.owner = root_node
 
 
 func read_nodes_recursive():
