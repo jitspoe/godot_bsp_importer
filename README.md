@@ -14,6 +14,7 @@ If you add a `set_import_value()` function, it should return true if the value w
 For example, if you have something with speed and want to convert the units on import, you could do this:
 
 ```gdscript
+@tool
 @export var speed : float
 
 func set_import_value(key : String, value : String) -> bool:
@@ -22,3 +23,8 @@ func set_import_value(key : String, value : String) -> bool:
 		return true
 	return false
 ```
+
+Also, if any nodes have a `post_import()` function, this will be called after everything has been imported.
+
+Note that any properties that need to be set via import need to have `@export` before them, and functions called by the import script need to have `@tool` set.
+
