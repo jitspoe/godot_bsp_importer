@@ -66,8 +66,20 @@ func _get_import_options(_path : String, preset_index : int):
 				"default_value" : "res://addons/bsp_importer/water_example_template.tscn"
 			},
 			{
+				"name" : "slime_scene_template",
+				"default_value" : "res://addons/bsp_importer/slime_example_template.tscn"
+			},
+			{
+				"name" : "lava_scene_template",
+				"default_value" : "res://addons/bsp_importer/lava_example_template.tscn"
+			},
+			{
 				"name" : "entity_remap",
 				"default_value" : { "trigger_example" : "res://triggers/trigger_example.tres" }
+			},
+			{
+				"name" : "import_lights",
+				"default_value" : true
 			}]
 		_:
 			return []
@@ -81,9 +93,12 @@ func _import(source_file : String, save_path : String, options, r_platform_varia
 	var bsp_reader := BSPReader.new()
 	bsp_reader.material_path_pattern = options["material_path_pattern"]
 	bsp_reader.water_template_path = options["water_scene_template"]
+	bsp_reader.slime_template_path = options["slime_scene_template"]
+	bsp_reader.lava_template_path = options["lava_scene_template"]
 	bsp_reader.inverse_scale_fac = options["inverse_scale_factor"]
 	bsp_reader.entity_remap = options.entity_remap
 	bsp_reader.texture_material_rename = options.texture_material_rename
+	bsp_reader.import_lights = options["import_lights"]
 
 	var bsp_scene := bsp_reader.read_bsp(source_file)
 	if (!bsp_scene):

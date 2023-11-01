@@ -9,8 +9,8 @@ const USE_TRIANGLE_COLLISION := false # To use convex collision, engine needs to
 const CONTENTS_EMPTY := -1
 const CONTENTS_SOLID := -2
 const CONTENTS_WATER := -3
-#define CONTENTS_SLIME        -4
-#define CONTENTS_LAVA         -5
+const CONTENTS_SLIME := -4
+const CONTENTS_LAVA := -5
 #define CONTENTS_SKY          -6
 #define CONTENTS_ORIGIN       -7
 #define CONTENTS_CLIP         -8
@@ -107,7 +107,7 @@ class BSPTexture:
 	var width : int
 	var height : int
 	var material : Material
-	var is_water := false
+	var is_warp := false
 	var is_transparent := false
 	static func get_data_size() -> int:
 		return 40 # 16 + 4 * 6
@@ -115,7 +115,7 @@ class BSPTexture:
 		name = file.get_buffer(16).get_string_from_ascii()
 		if name[0] == '*':
 			name = name.substr(1)
-			is_water = true
+			is_warp = true
 			is_transparent = true
 		width = file.get_32()
 		height = file.get_32()
@@ -252,11 +252,15 @@ func read_vector_convert_scaled() -> Vector3:
 var error := ERR_UNCONFIGURED
 var material_path_pattern : String
 var water_template_path : String
+var slime_template_path : String
+var lava_template_path : String
 var texture_material_rename : Dictionary
 var entity_remap : Dictionary
 var array_of_planes_array := []
 var array_of_planes : PackedInt32Array = []
 var water_planes_array := []  # Array of arrays of planes
+var slime_planes_array := []
+var lava_planes_array := []
 var file : FileAccess
 var leaves_offset : int
 var nodes_offset : int
@@ -265,9 +269,10 @@ var plane_normals : PackedVector3Array
 var plane_distances : PackedFloat32Array
 var model_scenes : Dictionary = {}
 var is_bsp2 := false
-var _unit_scale: float = 1.0
+var _unit_scale : float = 1.0
+var import_lights := true
 
-var inverse_scale_fac: float = 32.0:
+var inverse_scale_fac : float = 32.0:
 	set(v):
 		inverse_scale_fac = v
 		_unit_scale = 1.0 / v
@@ -277,7 +282,9 @@ func clear_data():
 	error = ERR_UNCONFIGURED
 	array_of_planes_array = []
 	array_of_planes = []
-	water_planes_array = []  # Array of arrays of planes
+	water_planes_array = []
+	slime_planes_array = []
+	lava_planes_array = []
 	if (file):
 		file.close()
 		file = null
@@ -385,10 +392,9 @@ func read_bsp(source_file : String) -> Node:
 	# Read entity data
 	file.seek(entity_offset)
 	var entity_string : String = file.get_buffer(entity_size).get_string_from_ascii()
-	print("Entity data: ", entity_string)
+	#print("Entity data: ", entity_string)
 	var entity_dict_array := parse_entity_string(entity_string)
 	convert_entity_dict_to_scene(entity_dict_array)
-	
 
 	#print("edges_offset: ", edges_offset)
 	file.seek(edges_offset)
@@ -495,7 +501,9 @@ func read_bsp(source_file : String) -> Node:
 
 	for model_index in num_models:
 		var surface_tools := {}
-		water_planes_array = [] # Clear that out so water isn't duplicated for each mesh. :D
+		water_planes_array = [] # Clear that out so water isn't duplicated for each mesh.
+		slime_planes_array = []
+		lava_planes_array = []
 		var needs_import := false
 		var parent_node : Node3D
 		var parent_inv_transform := Transform3D() # If a world model is rotated (such as a trigger) we want to keep things in the correct spot
@@ -515,7 +523,7 @@ func read_bsp(source_file : String) -> Node:
 			var face_size := BSPFace.get_data_size_q1bsp() if !is_bsp2 else BSPFace.get_data_size_bsp2()
 			file.seek(faces_offset + bsp_model.face_index * face_size)
 			var num_faces := bsp_model.face_count
-			print("num_faces: ", num_faces)
+			#print("num_faces: ", num_faces)
 			for face_index in num_faces:
 				if (is_bsp2):
 					bsp_face.read_face_bsp2(file)
@@ -660,8 +668,8 @@ func read_bsp(source_file : String) -> Node:
 				#print("Array of planes array: ", array_of_planes_array)
 				var model_mins := bsp_model.bound_min;
 				var model_maxs := bsp_model.bound_max;
-				print("Model mins: ", model_mins, " Model maxs: ", model_maxs)
-				print("Origin: ", bsp_model.origin)
+				#print("Model mins: ", model_mins, " Model maxs: ", model_maxs)
+				#print("Origin: ", bsp_model.origin)
 				var model_mins_maxs_planes : Array[Plane]
 				model_mins_maxs_planes.push_back(Plane(Vector3.RIGHT, model_maxs.x))
 				model_mins_maxs_planes.push_back(Plane(Vector3.UP, model_maxs.y))
@@ -673,16 +681,24 @@ func read_bsp(source_file : String) -> Node:
 				# Create collision shapes for world
 				create_collision_shapes(parent_node, array_of_planes_array, model_mins_maxs_planes, parent_inv_transform)
 
-				# Create collision shapes for water, if we have any
-				if (water_planes_array.size() > 0):
-					var water_body : Node = load(water_template_path).instantiate()
-					parent_node.add_child(water_body, true)
-					water_body.transform = parent_inv_transform
-					water_body.owner = root_node
-					create_collision_shapes(water_body, water_planes_array, model_mins_maxs_planes, Transform3D())
+				# Create liquids (water, slime, lava)
+				create_liquid(parent_node, water_planes_array, model_mins_maxs_planes, parent_inv_transform, water_template_path)
+				create_liquid(parent_node, slime_planes_array, model_mins_maxs_planes, parent_inv_transform, slime_template_path)
+				create_liquid(parent_node, lava_planes_array, model_mins_maxs_planes, parent_inv_transform, lava_template_path)
+	for node in post_import_nodes:
+		node.post_import(root_node)
 	file.close()
 	file = null
 	return root_node
+
+
+func create_liquid(parent_node : Node3D, planes_array : Array, model_mins_maxs_planes : Array[Plane], parent_inv_transform : Transform3D, template_path : String):
+	if (planes_array.size() > 0 && template_path):
+		var liquid_body : Node = load(template_path).instantiate()
+		parent_node.add_child(liquid_body, true)
+		liquid_body.transform = parent_inv_transform
+		liquid_body.owner = root_node
+		create_collision_shapes(liquid_body, planes_array, model_mins_maxs_planes, Transform3D())
 
 
 func parse_entity_string(entity_string : String) -> Array:
@@ -690,7 +706,7 @@ func parse_entity_string(entity_string : String) -> Array:
 	var ent_dict_array := []
 	var in_key_string := false
 	var in_value_string := false
-	var key : String
+	var key : StringName
 	var value : String
 	var parsed_key := false
 	for char in entity_string:
@@ -719,15 +735,20 @@ func parse_entity_string(entity_string : String) -> Array:
 		elif (char == '{'):
 			ent_dict = {}
 			parsed_key = false
-	print("ent dict: ", ent_dict_array)
+	#print("ent dict: ", ent_dict_array)
 	return ent_dict_array
 
 
+const LIGHT_STRING_NAME := StringName("light")
+var post_import_nodes : Array[Node] = []
+
+
 func convert_entity_dict_to_scene(ent_dict_array : Array):
+	post_import_nodes = []
 	for ent_dict in ent_dict_array:
 		if (ent_dict.has("classname")):
-			var classname : String = ent_dict["classname"]
-			print("Classname: ", classname)
+			var classname : StringName = ent_dict["classname"].to_lower()
+			#print("Classname: ", classname)
 			if (entity_remap.has(classname)):
 				var scene_path : String = entity_remap[classname]
 				print("Remapping ", classname, " to ", scene_path)
@@ -735,30 +756,13 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 				if (!scene_resource):
 					print("Failed to load ", scene_path)
 				else:
-					var scene : Node = scene_resource.instantiate()
-					if (!scene):
+					var scene_node : Node = scene_resource.instantiate()
+					if (!scene_node):
 						print("Failed to instantiate scene: ", scene_path)
 					else:
-						var origin := Vector3.ZERO
-						if (ent_dict.has("origin")):
-							var origin_string : String = ent_dict["origin"]
-							origin = string_to_origin(origin_string, _unit_scale)
-						var mangle_string : String = ent_dict.get("mangle", "")
-						var angle_string : String = ent_dict.get("angle", "")
-						var basis := Basis()
-						if (angle_string.length() > 0):
-							basis = angle_to_basis(angle_string)
-						if (mangle_string.length() > 0):
-							basis = mangle_to_basis(mangle_string)
-						var transform := Transform3D(basis, origin)
-						root_node.add_child(scene, true)
-						scene.transform = transform
-						scene.owner = root_node
-						if (ent_dict.has("model")):
-							var model_value : String = ent_dict["model"]
-							# Models that start with a * are contained with in the BSP file (ex: doors, triggers, etc)
-							if (model_value[0] == '*'):
-								model_scenes[model_value.substr(1).to_int()] = scene
+						if (scene_node.has_method("post_import")):
+							post_import_nodes.append(scene_node)
+						add_generic_entity(scene_node, ent_dict)
 						# For every key/value pair in the entity, see if there's a corresponding
 						# variable in the gdscript and set it.
 						for key in ent_dict:
@@ -769,14 +773,14 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 
 							# Allow scenes to have custom implementations of this so they can remap values or whatever
 							# Returning true means it was handled.
-							if (scene.has_method("set_import_value")):
-								if (!scene.get_script().is_tool()):
-									printerr(scene.name + " has 'set_import_value()' function but must have @tool set to work for imports.")
+							if (scene_node.has_method("set_import_value")):
+								if (!scene_node.get_script().is_tool()):
+									printerr(scene_node.name + " has 'set_import_value()' function but must have @tool set to work for imports.")
 								else:
-									if (scene.set_import_value(key, string_value)):
+									if (scene_node.set_import_value(key, string_value)):
 										continue
 
-							var dest_value = scene.get(key) # Se if we can figure out the type of the destination value
+							var dest_value = scene_node.get(key) # Se if we can figure out the type of the destination value
 							if (dest_value != null):
 								var dest_type := typeof(dest_value)
 								match (dest_type):
@@ -792,12 +796,79 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 										value = string_value
 									TYPE_VECTOR3:
 										value = string_to_vector3(string_value)
+									TYPE_COLOR:
+										value = string_to_color(string_value)
 									_:
 										printerr("Key value type not handled for ", key, " : ", dest_type)
 										value = string_value # Try setting it to the string value and hope for the best.
-							scene.set(key, value)
-							
-	print("model_scenes: ", model_scenes)
+							scene_node.set(key, value)
+			else: # No entity remap for this classname
+				if (classname == LIGHT_STRING_NAME):
+					if (import_lights):
+						add_light_entity(ent_dict)
+	#print("model_scenes: ", model_scenes)
+
+
+func add_generic_entity(scene_node : Node, ent_dict : Dictionary):
+	var origin := Vector3.ZERO
+	if (ent_dict.has("origin")):
+		var origin_string : String = ent_dict["origin"]
+		origin = string_to_origin(origin_string, _unit_scale)
+	var mangle_string : String = ent_dict.get("mangle", "")
+	var angle_string : String = ent_dict.get("angle", "")
+	var angles_string : String = ent_dict.get("angles", "")
+	var basis := Basis()
+	if (angle_string.length() > 0):
+		basis = angle_to_basis(angle_string)
+	if (mangle_string.length() > 0):
+		basis = mangle_to_basis(mangle_string)
+	if (angles_string.length() > 0):
+		basis = angles_to_basis(mangle_string)
+	var transform := Transform3D(basis, origin)
+	root_node.add_child(scene_node, true)
+	scene_node.transform = transform
+	scene_node.owner = root_node
+	if (ent_dict.has("model")):
+		var model_value : String = ent_dict["model"]
+		# Models that start with a * are contained with in the BSP file (ex: doors, triggers, etc)
+		if (model_value[0] == '*'):
+			model_scenes[model_value.substr(1).to_int()] = scene_node
+
+
+const _COLOR_STRING_NAME := StringName("_color")
+const COLOR_STRING_NAME := StringName("color")
+
+
+func add_light_entity(ent_dict : Dictionary):
+	var light_node := OmniLight3D.new()
+	var light_value := 300.0
+	var light_color := Color(1.0, 1.0, 1.0, 1.0)
+	var color_string : String
+	if (ent_dict.has(LIGHT_STRING_NAME)):
+		light_value = ent_dict[LIGHT_STRING_NAME].to_float()
+	if (ent_dict.has(_COLOR_STRING_NAME)):
+		light_color = string_to_color(ent_dict[_COLOR_STRING_NAME])
+	if (ent_dict.has(COLOR_STRING_NAME)):
+		light_color = string_to_color(ent_dict[COLOR_STRING_NAME])
+	light_node.omni_range = light_value * _unit_scale
+	light_node.light_energy = light_value / 255.0
+	light_node.light_color = light_color
+	light_node.shadow_enabled = true # Might want to have an option to shut this off for some lights?
+	add_generic_entity(light_node, ent_dict)
+
+
+func string_to_color(color_string : String) -> Color:
+	var color := Color(1.0, 1.0, 1.0, 1.0)
+	var floats := color_string.split_floats(" ")
+	var scale := 1.0
+	# Sometimes color is in the 0-255 range, so if anything is above 1, divide by 255
+	for f in floats:
+		if f > 1.0:
+			scale = 1.0 / 255.0
+			break
+	for i in min(3, floats.size()):
+		color[i] = floats[i] * scale
+	return color
 
 
 static func string_to_origin(origin_string : String, scale: float) -> Vector3:
@@ -838,8 +909,25 @@ static func angle_to_basis(angle_string : String) -> Basis:
 	return basis
 
 
+static func angles_to_basis(angles_string : String) -> Basis:
+	var split := angles_string.split(" ")
+	var angles := Vector3.ZERO
+	var i := 0
+	for pos in split:
+		if (i == 0):
+			angles[1] = deg_to_rad(pos.to_float())
+		elif (i == 1):
+			angles[0] = deg_to_rad(pos.to_float())
+		elif (i == 2):
+			angles[2] = deg_to_rad(pos.to_float())
+		i += 1
+	angles[0] = - angles[0] # For some reason pitch is invertid in quake mangles
+	var basis := Basis.from_euler(angles)
+	return basis
+
+
 func create_collision_shapes(body : Node3D, planes_array, model_mins_maxs_planes, parent_inv_transform : Transform3D):
-	print("Create collision shapes.")
+	#print("Create collision shapes.")
 	for i in planes_array.size():
 		var plane_indexes : PackedInt32Array = planes_array[i]
 		var convex_planes : Array[Plane]
@@ -887,10 +975,15 @@ func handle_node_child(child_value : int):
 		file.seek(file_offset)
 		var leaf_type := unsigned32_to_signed(file.get_32())
 		#print("leaf_type: ", leaf_type)
-		if (leaf_type == CONTENTS_SOLID):
-			array_of_planes_array.push_back(array_of_planes.duplicate())
-		elif (leaf_type == CONTENTS_WATER):
-			water_planes_array.push_back(array_of_planes.duplicate())
+		match leaf_type:
+			CONTENTS_SOLID:
+				array_of_planes_array.push_back(array_of_planes.duplicate())
+			CONTENTS_WATER:
+				water_planes_array.push_back(array_of_planes.duplicate())
+			CONTENTS_SLIME:
+				slime_planes_array.push_back(array_of_planes.duplicate())
+			CONTENTS_LAVA:
+				lava_planes_array.push_back(array_of_planes.duplicate())
 	else:
 		file.seek(nodes_offset + child_value * (NODES_STRUCT_SIZE_Q1BSP if !is_bsp2 else NODES_STRUCT_SIZE_Q1BSP2))
 		read_nodes_recursive()
