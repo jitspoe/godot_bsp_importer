@@ -80,6 +80,10 @@ func _get_import_options(_path : String, preset_index : int):
 			{
 				"name" : "import_lights",
 				"default_value" : true
+			},
+			{
+				"name" : "post_import_script",
+				"default_value" : ""
 			}]
 		_:
 			return []
@@ -99,6 +103,7 @@ func _import(source_file : String, save_path : String, options, r_platform_varia
 	bsp_reader.entity_remap = options.entity_remap
 	bsp_reader.texture_material_rename = options.texture_material_rename
 	bsp_reader.import_lights = options["import_lights"]
+	bsp_reader.post_import_script_path = options["post_import_script"]
 
 	var bsp_scene := bsp_reader.read_bsp(source_file)
 	if (!bsp_scene):

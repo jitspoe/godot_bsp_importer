@@ -271,6 +271,9 @@ var model_scenes : Dictionary = {}
 var is_bsp2 := false
 var _unit_scale : float = 1.0
 var import_lights := true
+var generate_lightmap_uv2 := true
+var post_import_script_path : String
+
 
 var inverse_scale_fac : float = 32.0:
 	set(v):
@@ -518,7 +521,7 @@ func read_bsp(source_file : String) -> Node:
 			needs_import = true # Import supported entities.
 			parent_node = model_scenes[model_index]
 			parent_inv_transform = parent_node.transform.inverse()
-		if (needs_import): # Only import the worldspawn for now, since doors and triggers will just block movement
+		if (needs_import):
 			var bsp_model : BSPModelData = model_data[model_index]
 			var face_size := BSPFace.get_data_size_q1bsp() if !is_bsp2 else BSPFace.get_data_size_bsp2()
 			file.seek(faces_offset + bsp_model.face_index * face_size)
@@ -631,18 +634,19 @@ func read_bsp(source_file : String) -> Node:
 			var array_mesh : ArrayMesh = null
 			for texture_name in surface_tools:
 				var surf_tool : SurfaceTool = surface_tools[texture_name]
-				#print("surf_tool: ", surf_tool, " tex name: ", texture_name)
 				surf_tool.generate_tangents()
 				array_mesh = surf_tool.commit(array_mesh)
-			mesh_instance.mesh = array_mesh
-			mesh_instance.name = "Mesh"
-			parent_node.add_child(mesh_instance, true)
-			mesh_instance.transform = parent_inv_transform
-			mesh_instance.owner = root_node
-			#print("face_data_left: ", face_data_left)
+			if (array_mesh):
+				mesh_instance.mesh = array_mesh
+				mesh_instance.name = "Mesh"
+				parent_node.add_child(mesh_instance, true)
+				mesh_instance.transform = parent_inv_transform
+				print("added mesh.")
+				mesh_instance.owner = root_node
+				if (generate_lightmap_uv2):
+					var err = mesh_instance.mesh.lightmap_unwrap(mesh_instance.global_transform, _unit_scale * 4.0)
+					print("Lightmap unwrap result: ", err)
 
-			# Collision.
-			# Could ultimately read the clip stuff and create convex shapes, but just going to use triangle mesh collision for now.
 			if (USE_TRIANGLE_COLLISION):
 				var collision_shape := CollisionShape3D.new()
 				collision_shape.name = "CollisionShape"
@@ -685,8 +689,24 @@ func read_bsp(source_file : String) -> Node:
 				create_liquid(parent_node, water_planes_array, model_mins_maxs_planes, parent_inv_transform, water_template_path)
 				create_liquid(parent_node, slime_planes_array, model_mins_maxs_planes, parent_inv_transform, slime_template_path)
 				create_liquid(parent_node, lava_planes_array, model_mins_maxs_planes, parent_inv_transform, lava_template_path)
+	if (post_import_script_path):
+		var post_import_node := Node.new()
+		print("Loading post import script: ", post_import_script_path)
+		var script = load(post_import_script_path)
+		if (script && script is Script):
+			post_import_node.set_script(script)
+			if (post_import_node.has_method("post_import")):
+				if (post_import_node.get_script().is_tool()):
+					post_import_node.post_import(root_node)
+				else:
+					printerr("Post import script must have @tool set.")
+			else:
+				printerr("Post import script does not have post_import() function.")
+		else:
+			printerr("Invalid script path: ", post_import_script_path)
 	for node in post_import_nodes:
 		node.post_import(root_node)
+			
 	file.close()
 	file = null
 	return root_node
