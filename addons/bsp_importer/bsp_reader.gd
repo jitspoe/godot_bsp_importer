@@ -271,6 +271,7 @@ var model_scenes : Dictionary = {}
 var is_bsp2 := false
 var _unit_scale : float = 1.0
 var import_lights := true
+var generate_occlusion_culling := true
 var generate_lightmap_uv2 := true
 var post_import_script_path : String
 
@@ -646,6 +647,29 @@ func read_bsp(source_file : String) -> Node:
 				if (generate_lightmap_uv2):
 					var err = mesh_instance.mesh.lightmap_unwrap(mesh_instance.global_transform, _unit_scale * 4.0)
 					print("Lightmap unwrap result: ", err)
+				
+				if generate_occlusion_culling:
+					# Occlusion mesh data
+					var vertices := PackedVector3Array()
+					var indices := PackedInt32Array()
+					# Build occlusion from all surfaces of the array mesh.
+					for i in range(0, array_mesh.get_surface_count()):
+						var offset = vertices.size()
+						var arrays := array_mesh.surface_get_arrays(i)
+						vertices.append_array(arrays[ArrayMesh.ARRAY_VERTEX])
+						if arrays[ArrayMesh.ARRAY_INDEX] == null:
+							indices.append_array(range(offset, offset + arrays[ArrayMesh.ARRAY_VERTEX].size()))
+						else:
+							for index in arrays[ArrayMesh.ARRAY_INDEX]:
+								indices.append(index + offset)
+					# Create and add occluder and occluder instance.
+					var occluder = ArrayOccluder3D.new()
+					occluder.set_arrays(vertices, indices)
+					var occluder_instance = OccluderInstance3D.new()
+					occluder_instance.occluder = occluder
+					occluder_instance.name = "Occluder"
+					mesh_instance.add_child(occluder_instance, true)
+					occluder_instance.owner = root_node
 
 			if (USE_TRIANGLE_COLLISION):
 				var collision_shape := CollisionShape3D.new()
