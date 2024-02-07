@@ -82,6 +82,10 @@ func _get_import_options(_path : String, preset_index : int):
 				"default_value" : true
 			},
 			{
+				"name" : "generate_occlusion_culling",
+				"default_value" : true
+			},
+			{
 				"name" : "post_import_script",
 				"default_value" : ""
 			}]
@@ -103,6 +107,7 @@ func _import(source_file : String, save_path : String, options, r_platform_varia
 	bsp_reader.entity_remap = options.entity_remap
 	bsp_reader.texture_material_rename = options.texture_material_rename
 	bsp_reader.import_lights = options["import_lights"]
+	bsp_reader.generate_occlusion_culling = options["generate_occlusion_culling"]
 	bsp_reader.post_import_script_path = options["post_import_script"]
 
 	var bsp_scene := bsp_reader.read_bsp(source_file)
