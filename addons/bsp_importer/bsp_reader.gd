@@ -78,6 +78,9 @@ func read_model_data_q1_bsp(model_data : BSPModelData):
 	var maxs := read_vector_convert_scaled()
 	model_data.bound_min = Vector3(min(mins.x, maxs.x), min(mins.y, maxs.y), min(mins.z, maxs.z))
 	model_data.bound_max = Vector3(max(mins.x, maxs.x), max(mins.y, maxs.y), max(mins.z, maxs.z))
+	# Not sure why, but it seems the mins/maxs are 1 unit inside of the actual mins/maxs, so increase bounds by 1 unit:
+	model_data.bound_min -= Vector3(_unit_scale, _unit_scale, _unit_scale)
+	model_data.bound_max += Vector3(_unit_scale, _unit_scale, _unit_scale)
 	model_data.origin = read_vector_convert_scaled()
 	model_data.node_id0 = file.get_32()
 	model_data.node_id1 = file.get_32()
@@ -119,6 +122,7 @@ class BSPTexture:
 			is_transparent = true
 		width = file.get_32()
 		height = file.get_32()
+		name = name.to_lower()
 		print("texture: ", name, " width: ", width, " height: ", height)
 		#material = load("res://materials/%s_material.tres" % name)
 		var material_path : String
@@ -126,7 +130,7 @@ class BSPTexture:
 			material_path = texture_material_rename[name]
 		else:
 			material_path = material_path_pattern.replace("{texture_name}", name)
-		if (name != "skip"):
+		if (name != "skip" && name != "trigger"):
 			if (width != 0 && height != 0): # Temp hack for nonexistent textures.
 				material = load(material_path)
 			if (!material):
@@ -442,7 +446,7 @@ func read_bsp(source_file : String) -> Node:
 	# todo
 	
 	# Read in the textures (to get the sizes for UV's)
-	print("textures offset: ", textures_offset)
+	#print("textures offset: ", textures_offset)
 	#var texture_data_left := textures_size
 	#var num_textures := textures_size / BSPTexture.get_data_size()
 	var textures := []
@@ -521,7 +525,7 @@ func read_bsp(source_file : String) -> Node:
 		if (model_scenes.has(model_index)):
 			needs_import = true # Import supported entities.
 			parent_node = model_scenes[model_index]
-			parent_inv_transform = parent_node.transform.inverse()
+			parent_inv_transform = Transform3D(parent_node.transform.basis.inverse(), Vector3.ZERO) #parent_node.transform.inverse()
 		if (needs_import):
 			var bsp_model : BSPModelData = model_data[model_index]
 			var face_size := BSPFace.get_data_size_q1bsp() if !is_bsp2 else BSPFace.get_data_size_bsp2()
@@ -642,11 +646,11 @@ func read_bsp(source_file : String) -> Node:
 				mesh_instance.name = "Mesh"
 				parent_node.add_child(mesh_instance, true)
 				mesh_instance.transform = parent_inv_transform
-				print("added mesh.")
+				#print("added mesh.")
 				mesh_instance.owner = root_node
 				if (generate_lightmap_uv2):
 					var err = mesh_instance.mesh.lightmap_unwrap(mesh_instance.global_transform, _unit_scale * 4.0)
-					print("Lightmap unwrap result: ", err)
+					#print("Lightmap unwrap result: ", err)
 				
 				if generate_occlusion_culling:
 					# Occlusion mesh data
@@ -728,11 +732,13 @@ func read_bsp(source_file : String) -> Node:
 				printerr("Post import script does not have post_import() function.")
 		else:
 			printerr("Invalid script path: ", post_import_script_path)
+	#print("Post import nodes: ", post_import_nodes)
 	for node in post_import_nodes:
 		node.post_import(root_node)
 			
 	file.close()
 	file = null
+	print("BSP read complete.")
 	return root_node
 
 
@@ -782,7 +788,7 @@ func parse_entity_string(entity_string : String) -> Array:
 	#print("ent dict: ", ent_dict_array)
 	return ent_dict_array
 
-
+const WORLDSPAWN_STRING_NAME := StringName("worldspawn")
 const LIGHT_STRING_NAME := StringName("light")
 var post_import_nodes : Array[Node] = []
 
@@ -850,6 +856,9 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 				if (classname == LIGHT_STRING_NAME):
 					if (import_lights):
 						add_light_entity(ent_dict)
+				else:
+					if (classname != WORLDSPAWN_STRING_NAME):
+						printerr("No entity remap found for ", classname, ".  Ignoring.")
 	#print("model_scenes: ", model_scenes)
 
 
@@ -863,11 +872,11 @@ func add_generic_entity(scene_node : Node, ent_dict : Dictionary):
 	var angles_string : String = ent_dict.get("angles", "")
 	var basis := Basis()
 	if (angle_string.length() > 0):
-		basis = angle_to_basis(angle_string)
+		basis = angle_string_to_basis(angle_string)
 	if (mangle_string.length() > 0):
-		basis = mangle_to_basis(mangle_string)
+		basis = mangle_string_to_basis(mangle_string)
 	if (angles_string.length() > 0):
-		basis = angles_to_basis(mangle_string)
+		basis = angles_string_to_basis(angles_string)
 	var transform := Transform3D(basis, origin)
 	root_node.add_child(scene_node, true)
 	scene_node.transform = transform
@@ -931,43 +940,44 @@ static func string_to_vector3(vec_string : String) -> Vector3:
 	return vec
 
 
-static func mangle_to_basis(mangle_string : String) -> Basis:
-	var split := mangle_string.split(" ")
+static func string_to_angles_pyr(angles_string : String, pitch_up_negative : bool) -> Vector3:
+	var split := angles_string.split(" ")
 	var angles := Vector3.ZERO
 	var i := 0
 	for pos in split:
 		if (i < 3):
 			angles[i] = deg_to_rad(pos.to_float())
 		i += 1
-	#var angles_ypr := Vector3(angles[1], angles[0], angles[2])
-	#angles[1] -= PI * 0.5 # In Quake, X is forward (0 degrees).  In Godot, -Z is forward.
-	angles[0] = - angles[0] # For some reason pitch is invertid in quake mangles
-	var basis := Basis.from_euler(angles)
-	return basis
+	if (pitch_up_negative):
+		angles[0] = -angles[0]
+	return angles
 
 
-static func angle_to_basis(angle_string : String) -> Basis:
+static func angles_string_to_basis_pyr(angles_string : String, pitch_up_negative : bool) -> Basis:
+	var angles := string_to_angles_pyr(angles_string, pitch_up_negative)
+	return Basis.from_euler(angles)
+
+
+static func mangle_string_to_basis(mangle_string : String) -> Basis:
+	return angles_string_to_basis_pyr(mangle_string, true)
+
+
+static func angle_string_to_basis(angle_string : String) -> Basis:
+	# Special case for up and down:
+	if (angle_string == "-1"): # Up, but Z is negative for forward, so we use DOWN
+		return Basis(Vector3.RIGHT, Vector3.FORWARD, Vector3.DOWN)
+	if (angle_string == "-2"): # Down, but Z is negative for forward, so we use UP
+		return Basis(Vector3.RIGHT, Vector3.BACK, Vector3.UP)
 	var angles := Vector3.ZERO
 	angles[1] = deg_to_rad(angle_string.to_float())
 	var basis := Basis.from_euler(angles)
 	return basis
 
 
-static func angles_to_basis(angles_string : String) -> Basis:
-	var split := angles_string.split(" ")
-	var angles := Vector3.ZERO
-	var i := 0
-	for pos in split:
-		if (i == 0):
-			angles[1] = deg_to_rad(pos.to_float())
-		elif (i == 1):
-			angles[0] = deg_to_rad(pos.to_float())
-		elif (i == 2):
-			angles[2] = deg_to_rad(pos.to_float())
-		i += 1
-	angles[0] = - angles[0] # For some reason pitch is invertid in quake mangles
-	var basis := Basis.from_euler(angles)
-	return basis
+static func angles_string_to_basis(angles_string : String) -> Basis:
+	# Sometimes this is the same as mangle, and sometimes it's yaw pitch roll, depending on the entity
+	# Not sure 100% what the rules are, so just use mangle for now.
+	return angles_string_to_basis_pyr(angles_string, true)
 
 
 func create_collision_shapes(body : Node3D, planes_array, model_mins_maxs_planes, parent_inv_transform : Transform3D):
@@ -1058,11 +1068,11 @@ func handle_clip_child(file : FileAccess, clipnodes_offset : int, child_value : 
 func convert_planes_to_points(convex_planes : Array[Plane]) -> PackedVector3Array :
 	# If you get errors about this, you're using a godot version that doesn't have this 
 	# function exposed, yet.  Comment it out and uncomment the code below.
-	#return Geometry3D.compute_convex_mesh_points(convex_planes)
-	var clipper := BspClipper.new()
-	clipper.begin()
-	for plane in convex_planes:
-		clipper.clip_plane(plane)
-	clipper.filter_and_clean()
-	
-	return clipper.vertices
+	return Geometry3D.compute_convex_mesh_points(convex_planes)
+#	var clipper := BspClipper.new()
+#	clipper.begin()
+#	for plane in convex_planes:
+#		clipper.clip_plane(plane)
+#	clipper.filter_and_clean()
+#
+#	return clipper.vertices
