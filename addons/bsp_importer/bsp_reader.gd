@@ -122,6 +122,7 @@ class BSPTexture:
 			is_transparent = true
 		width = file.get_32()
 		height = file.get_32()
+		name = name.to_lower()
 		print("texture: ", name, " width: ", width, " height: ", height)
 		#material = load("res://materials/%s_material.tres" % name)
 		var material_path : String
@@ -129,7 +130,7 @@ class BSPTexture:
 			material_path = texture_material_rename[name]
 		else:
 			material_path = material_path_pattern.replace("{texture_name}", name)
-		if (name != "skip"):
+		if (name != "skip" && name != "trigger"):
 			if (width != 0 && height != 0): # Temp hack for nonexistent textures.
 				material = load(material_path)
 			if (!material):
@@ -707,6 +708,7 @@ func read_bsp(source_file : String) -> Node:
 				printerr("Post import script does not have post_import() function.")
 		else:
 			printerr("Invalid script path: ", post_import_script_path)
+	#print("Post import nodes: ", post_import_nodes)
 	for node in post_import_nodes:
 		node.post_import(root_node)
 			
@@ -937,6 +939,11 @@ static func mangle_string_to_basis(mangle_string : String) -> Basis:
 
 
 static func angle_string_to_basis(angle_string : String) -> Basis:
+	# Special case for up and down:
+	if (angle_string == "-1"): # Up, but Z is negative for forward, so we use DOWN
+		return Basis(Vector3.RIGHT, Vector3.FORWARD, Vector3.DOWN)
+	if (angle_string == "-2"): # Down, but Z is negative for forward, so we use UP
+		return Basis(Vector3.RIGHT, Vector3.BACK, Vector3.UP)
 	var angles := Vector3.ZERO
 	angles[1] = deg_to_rad(angle_string.to_float())
 	var basis := Basis.from_euler(angles)
@@ -1037,11 +1044,11 @@ func handle_clip_child(file : FileAccess, clipnodes_offset : int, child_value : 
 func convert_planes_to_points(convex_planes : Array[Plane]) -> PackedVector3Array :
 	# If you get errors about this, you're using a godot version that doesn't have this 
 	# function exposed, yet.  Comment it out and uncomment the code below.
-	#return Geometry3D.compute_convex_mesh_points(convex_planes)
-	var clipper := BspClipper.new()
-	clipper.begin()
-	for plane in convex_planes:
-		clipper.clip_plane(plane)
-	clipper.filter_and_clean()
-	
-	return clipper.vertices
+	return Geometry3D.compute_convex_mesh_points(convex_planes)
+#	var clipper := BspClipper.new()
+#	clipper.begin()
+#	for plane in convex_planes:
+#		clipper.clip_plane(plane)
+#	clipper.filter_and_clean()
+#
+#	return clipper.vertices
