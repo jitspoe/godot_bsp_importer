@@ -106,7 +106,7 @@ class BSPModelDataQ2:
 
 
 class BSPTexture:
-	var name : String
+	var name : StringName
 	var width : int
 	var height : int
 	var material : Material
@@ -116,7 +116,7 @@ class BSPTexture:
 		return 40 # 16 + 4 * 6
 	func read_texture(file : FileAccess, material_path_pattern : String, texture_material_rename : Dictionary) -> int:
 		name = file.get_buffer(16).get_string_from_ascii()
-		if name[0] == '*':
+		if (name.begins_with("*")):
 			name = name.substr(1)
 			is_warp = true
 			is_transparent = true
@@ -124,13 +124,12 @@ class BSPTexture:
 		height = file.get_32()
 		name = name.to_lower()
 		print("texture: ", name, " width: ", width, " height: ", height)
-		#material = load("res://materials/%s_material.tres" % name)
 		var material_path : String
 		if (texture_material_rename.has(name)):
 			material_path = texture_material_rename[name]
 		else:
 			material_path = material_path_pattern.replace("{texture_name}", name)
-		if (name != "skip" && name != "trigger"):
+		if (name != "skip" && name != "trigger" && name != "waterskip" && name != "slimeskip"):
 			if (width != 0 && height != 0): # Temp hack for nonexistent textures.
 				material = load(material_path)
 			if (!material):
@@ -260,6 +259,7 @@ var slime_template_path : String
 var lava_template_path : String
 var texture_material_rename : Dictionary
 var entity_remap : Dictionary
+var entity_offsets_quake_units : Dictionary
 var array_of_planes_array := []
 var array_of_planes : PackedInt32Array = []
 var water_planes_array := []  # Array of arrays of planes
@@ -276,8 +276,11 @@ var is_bsp2 := false
 var _unit_scale : float = 1.0
 var import_lights := true
 var generate_occlusion_culling := true
+var culling_textures_exclude : Array[StringName]
 var generate_lightmap_uv2 := true
 var post_import_script_path : String
+var separate_mesh_on_grid := false
+var mesh_separation_grid_size := 256.0
 
 
 var inverse_scale_fac : float = 32.0:
@@ -508,14 +511,15 @@ func read_bsp(source_file : String) -> Node:
 	var previous_tex_name := "UNSET"
 
 	for model_index in num_models:
-		var surface_tools := {}
+		var mesh_grid := {} # Dictionary of surface tools where the key is an integer vector3.
 		water_planes_array = [] # Clear that out so water isn't duplicated for each mesh.
 		slime_planes_array = []
 		lava_planes_array = []
 		var needs_import := false
 		var parent_node : Node3D
 		var parent_inv_transform := Transform3D() # If a world model is rotated (such as a trigger) we want to keep things in the correct spot
-		if (model_index == 0): # worldspawn
+		var is_worldspawn := (model_index == 0)
+		if (is_worldspawn):
 			needs_import = true # Always import worldspawn.
 			var static_body := StaticBody3D.new()
 			static_body.name = "StaticBody"
@@ -538,35 +542,15 @@ func read_bsp(source_file : String) -> Node:
 				else:
 					bsp_face.read_face_q1bsp(file)
 				if (bsp_face.texinfo_id > textureinfos.size()):
-					print("Bad texinfo_id: ", bsp_face.texinfo_id)
+					printerr("Bad texinfo_id: ", bsp_face.texinfo_id)
 					bsp_face.print_face()
 					continue
-				# Get the texture from the face
-				var tex_info : BSPTextureInfo = textureinfos[bsp_face.texinfo_id]
-				var texture : BSPTexture = textures[tex_info.texture_index]
-				var surf_tool : SurfaceTool
-				if (texture.is_transparent):
-					# Transparent meshes need to be sorted, so make each face its own mesh for now.
-					surf_tool = SurfaceTool.new()
-					surf_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-					surf_tool.set_material(texture.material)
-				else:
-					if (surface_tools.has(texture.name)):
-						surf_tool = surface_tools[texture.name]
-					else:
-						surf_tool = SurfaceTool.new()
-						surf_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
-						surf_tool.set_material(texture.material)
-						surface_tools[texture.name] = surf_tool
-				
-				#print("plane id: ", bsp_face.plane_id)
-				#print("face edge count: ", bsp_face.num_edges)
 				if (bsp_face.num_edges < 3):
-					print("face with fewer than 3 edges.")
-					bsp_face.print_face() # TODO: Debug, testing
+					printerr("face with fewer than 3 edges.")
+					bsp_face.print_face()
 					continue
+
 				var edge_list_index_start := bsp_face.edge_list_id
-				#print("edge list index start: ", edge_list_index_start)
 				var i := 0
 				var face_verts : PackedVector3Array
 				face_verts.resize(bsp_face.num_edges)
@@ -579,13 +563,15 @@ func read_bsp(source_file : String) -> Node:
 					print("Plane id out of bounds: ", bsp_face.plane_id)
 				if (bsp_face.side):
 					face_normal = -face_normal
-				
+
+				# Get the texture from the face
+				var tex_info : BSPTextureInfo = textureinfos[bsp_face.texinfo_id]
+				var texture : BSPTexture = textures[tex_info.texture_index]
+
 				var vs := tex_info.vec_s
 				var vt := tex_info.vec_t
 				var s := tex_info.offset_s
 				var t := tex_info.offset_t
-				#print("texture_index: ", tex_info.texture_index)
-				
 				var tex_width : int = texture.width
 				var tex_height : int = texture.height
 				var tex_name : String = texture.name
@@ -597,6 +583,7 @@ func read_bsp(source_file : String) -> Node:
 				var tex_scale_x := 1.0 / (_unit_scale * tex_width)
 				var tex_scale_y := 1.0 / (_unit_scale * tex_height)
 				#print("normal: ", face_normal)
+				var face_position := Vector3.ZERO
 				for edge_list_index in range(edge_list_index_start, edge_list_index_start + bsp_face.num_edges):
 					var vert_index_0 : int
 					var reverse_order := false
@@ -616,12 +603,37 @@ func read_bsp(source_file : String) -> Node:
 					face_uvs[i].x = vert.dot(vs) * tex_scale_x + s / tex_width
 					face_uvs[i].y = vert.dot(vt) * tex_scale_y + t / tex_height
 					#print("vert: ", vert, " vs: ", vs, " d: ", vert.dot(vs), " vt: ", vt, " d: ", vert.dot(vt))
+					face_position += vert
 					i += 1
+				face_position /= i # Average all the verts
+				var surf_tool : SurfaceTool
+				if (texture.is_transparent):
+					# Transparent meshes need to be sorted, so make each face its own mesh for now.
+					surf_tool = SurfaceTool.new()
+					surf_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+					surf_tool.set_material(texture.material)
+				else:
+					var grid_index
+					if (separate_mesh_on_grid):
+						grid_index = Vector3i(face_position / mesh_separation_grid_size)
+					else:
+						grid_index = 0
+					
+					var surface_tools : Dictionary = mesh_grid.get(grid_index, {})
+					if (surface_tools.has(texture.name)):
+						surf_tool = surface_tools[texture.name]
+					else:
+						surf_tool = SurfaceTool.new()
+						surf_tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+						surf_tool.set_material(texture.material)
+						surface_tools[texture.name] = surf_tool
+					mesh_grid[grid_index] = surface_tools
 				surf_tool.add_triangle_fan(face_verts, face_uvs, [], [], face_normals)
-				
-				if (texture.is_transparent): # Need to create unique meshes for each transparent surface so they sort properly.
+
+				# Need to create unique meshes for each transparent surface so they sort properly.
+				# These ignore the mesh grid.
+				if (texture.is_transparent):
 					var mesh_instance := MeshInstance3D.new()
-			
 					# Create a mesh out of all the surfaces
 					surf_tool.generate_tangents()
 					var array_mesh : ArrayMesh = null
@@ -631,59 +643,76 @@ func read_bsp(source_file : String) -> Node:
 					parent_node.add_child(mesh_instance, true)
 					mesh_instance.transform = parent_inv_transform
 					mesh_instance.owner = root_node
-	
-			# Put all non-transparent textures into a single mesh
-			var mesh_instance := MeshInstance3D.new()
-			
-			# Create a mesh out of all the surfaces
-			var array_mesh : ArrayMesh = null
-			for texture_name in surface_tools:
-				var surf_tool : SurfaceTool = surface_tools[texture_name]
-				surf_tool.generate_tangents()
-				array_mesh = surf_tool.commit(array_mesh)
-			if (array_mesh):
-				mesh_instance.mesh = array_mesh
-				mesh_instance.name = "Mesh"
-				parent_node.add_child(mesh_instance, true)
-				mesh_instance.transform = parent_inv_transform
-				#print("added mesh.")
-				mesh_instance.owner = root_node
-				if (generate_lightmap_uv2):
-					var err = mesh_instance.mesh.lightmap_unwrap(mesh_instance.global_transform, _unit_scale * 4.0)
-					#print("Lightmap unwrap result: ", err)
-				
-				if generate_occlusion_culling:
-					# Occlusion mesh data
-					var vertices := PackedVector3Array()
-					var indices := PackedInt32Array()
-					# Build occlusion from all surfaces of the array mesh.
-					for i in range(0, array_mesh.get_surface_count()):
-						var offset = vertices.size()
-						var arrays := array_mesh.surface_get_arrays(i)
-						vertices.append_array(arrays[ArrayMesh.ARRAY_VERTEX])
-						if arrays[ArrayMesh.ARRAY_INDEX] == null:
-							indices.append_array(range(offset, offset + arrays[ArrayMesh.ARRAY_VERTEX].size()))
-						else:
-							for index in arrays[ArrayMesh.ARRAY_INDEX]:
-								indices.append(index + offset)
-					# Create and add occluder and occluder instance.
-					var occluder = ArrayOccluder3D.new()
-					occluder.set_arrays(vertices, indices)
-					var occluder_instance = OccluderInstance3D.new()
-					occluder_instance.occluder = occluder
-					occluder_instance.name = "Occluder"
-					mesh_instance.add_child(occluder_instance, true)
-					occluder_instance.owner = root_node
 
-			if (USE_TRIANGLE_COLLISION):
-				var collision_shape := CollisionShape3D.new()
-				collision_shape.name = "CollisionShape"
-				collision_shape.shape = mesh_instance.mesh.create_trimesh_shape()
-				parent_node.add_child(collision_shape, true)
-				mesh_instance.transform = parent_inv_transform
-				collision_shape.owner = root_node
-				# Apparently we have to let the gc handle this autamically now: file.close()
-			else: # Attempt to create collision out of BSP nodes
+			# Create meshes for each cell in the mesh grid.
+			for grid_index in mesh_grid:
+				var surface_tools = mesh_grid[grid_index] # Is there a way to loop through the keys instead?
+				var mesh_instance := MeshInstance3D.new()
+				var array_mesh : ArrayMesh = null
+				var array_mesh_no_cull : ArrayMesh = null
+				var has_nocull_materials := false
+				for texture_name in surface_tools:
+					var surf_tool : SurfaceTool = surface_tools[texture_name]
+					surf_tool.generate_tangents()
+					if (culling_textures_exclude.has(texture_name)):
+						#array_mesh_no_cull = surf_tool.commit(array_mesh_no_cull)
+						has_nocull_materials = true
+						print("Has no-cull materials")
+					else:
+						array_mesh = surf_tool.commit(array_mesh)
+
+				if (array_mesh || has_nocull_materials):
+					mesh_instance.mesh = array_mesh
+					mesh_instance.name = "Mesh"
+					parent_node.add_child(mesh_instance, true)
+					mesh_instance.transform = parent_inv_transform
+					mesh_instance.owner = root_node
+
+					if (generate_occlusion_culling && array_mesh && is_worldspawn): # TOmaybeDO - optional flag on entities for like large doors or something to have occlusion culling?
+						# Occlusion mesh data
+						var vertices := PackedVector3Array()
+						var indices := PackedInt32Array()
+						# Build occlusion from all surfaces of the array mesh.
+						for i in range(0, array_mesh.get_surface_count()):
+							var offset = vertices.size()
+							var arrays := array_mesh.surface_get_arrays(i)
+							vertices.append_array(arrays[ArrayMesh.ARRAY_VERTEX])
+							if arrays[ArrayMesh.ARRAY_INDEX] == null:
+								indices.append_array(range(offset, offset + arrays[ArrayMesh.ARRAY_VERTEX].size()))
+							else:
+								for index in arrays[ArrayMesh.ARRAY_INDEX]:
+									indices.append(index + offset)
+						# Create and add occluder and occluder instance.
+						var occluder = ArrayOccluder3D.new()
+						occluder.set_arrays(vertices, indices)
+						var occluder_instance = OccluderInstance3D.new()
+						occluder_instance.occluder = occluder
+						occluder_instance.name = "Occluder"
+						mesh_instance.add_child(occluder_instance, true)
+						occluder_instance.owner = root_node
+
+					# Add non-occluding materials to the mesh after we've generated occlusion
+					if (has_nocull_materials):
+						print("Yep.")
+						for texture_name in surface_tools:
+							if (culling_textures_exclude.has(texture_name)):
+								var surf_tool : SurfaceTool = surface_tools[texture_name]
+								array_mesh = surf_tool.commit(array_mesh)
+						mesh_instance.mesh = array_mesh
+
+					if (generate_lightmap_uv2):
+						var err = mesh_instance.mesh.lightmap_unwrap(mesh_instance.global_transform, _unit_scale * 4.0)
+						#print("Lightmap unwrap result: ", err)
+
+				if (USE_TRIANGLE_COLLISION):
+					var collision_shape := CollisionShape3D.new()
+					collision_shape.name = "CollisionShape"
+					collision_shape.shape = mesh_instance.mesh.create_trimesh_shape()
+					parent_node.add_child(collision_shape, true)
+					mesh_instance.transform = parent_inv_transform
+					collision_shape.owner = root_node
+					# Apparently we have to let the gc handle this autamically now: file.close()
+			if (!USE_TRIANGLE_COLLISION): # Attempt to create collision out of BSP nodes
 				# Clear these out, as we may be importing multiple models.
 				array_of_planes_array = []
 				array_of_planes = []
@@ -867,6 +896,8 @@ func add_generic_entity(scene_node : Node, ent_dict : Dictionary):
 	if (ent_dict.has("origin")):
 		var origin_string : String = ent_dict["origin"]
 		origin = string_to_origin(origin_string, _unit_scale)
+	var offset : Vector3 = convert_vector_from_quake_scaled(entity_offsets_quake_units.get(ent_dict["classname"], Vector3.ZERO), _unit_scale)
+	origin += offset
 	var mangle_string : String = ent_dict.get("mangle", "")
 	var angle_string : String = ent_dict.get("angle", "")
 	var angles_string : String = ent_dict.get("angles", "")

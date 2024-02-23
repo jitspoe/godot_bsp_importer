@@ -75,7 +75,12 @@ func _get_import_options(_path : String, preset_index : int):
 			},
 			{
 				"name" : "entity_remap",
-				"default_value" : { "trigger_example" : "res://triggers/trigger_example.tres" }
+				"default_value" : { &"trigger_example" : "res://triggers/trigger_example.tres" }
+			},
+			## Can we have tooltips here?
+			{
+				"name" : "entity_offsets_quake_units",
+				"default_value" : { &"example_offset_entity" : Vector3(16, 16, 0) }
 			},
 			{
 				"name" : "import_lights",
@@ -84,6 +89,18 @@ func _get_import_options(_path : String, preset_index : int):
 			{
 				"name" : "generate_occlusion_culling",
 				"default_value" : true
+			},
+			{
+				"name" : "culling_textures_exclude",
+				"default_value" : [] as Array[StringName]
+			},
+			{
+				"name" : "separate_mesh_on_grid",
+				"default_value" : false
+			},
+			{
+				"name" : "mesh_separation_grid_size",
+				"default_value" : 256.0
 			},
 			{
 				"name" : "post_import_script",
@@ -104,10 +121,14 @@ func _import(source_file : String, save_path : String, options, r_platform_varia
 	bsp_reader.slime_template_path = options["slime_scene_template"]
 	bsp_reader.lava_template_path = options["lava_scene_template"]
 	bsp_reader.inverse_scale_fac = options["inverse_scale_factor"]
+	bsp_reader.separate_mesh_on_grid = options["separate_mesh_on_grid"]
+	bsp_reader.mesh_separation_grid_size = options["mesh_separation_grid_size"]
 	bsp_reader.entity_remap = options.entity_remap
+	bsp_reader.entity_offsets_quake_units = options.entity_offsets_quake_units
 	bsp_reader.texture_material_rename = options.texture_material_rename
 	bsp_reader.import_lights = options["import_lights"]
 	bsp_reader.generate_occlusion_culling = options["generate_occlusion_culling"]
+	bsp_reader.culling_textures_exclude = options.culling_textures_exclude
 	bsp_reader.post_import_script_path = options["post_import_script"]
 
 	var bsp_scene := bsp_reader.read_bsp(source_file)
