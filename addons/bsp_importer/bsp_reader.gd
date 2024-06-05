@@ -120,6 +120,9 @@ class BSPTexture:
 			name = name.substr(1)
 			is_warp = true
 			is_transparent = true
+		if (name.begins_with("{")):
+			name = name.substr(1)
+			is_transparent = true
 		width = file.get_32()
 		height = file.get_32()
 		name = name.to_lower()
@@ -842,9 +845,17 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 						if (scene_node.has_method("post_import")):
 							post_import_nodes.append(scene_node)
 						add_generic_entity(scene_node, ent_dict)
+
+						# Imported script might need to know all values in the entity dictionary ahead of time, so optionally send that as well.
+						if (scene_node.has_method("set_entity_dictionary")):
+							if (!scene_node.get_script().is_tool()):
+								printerr(scene_node.name + " has 'set_entity_dictionary()' function but must have @tool set to work for imports.")
+							else:
+								scene_node.set_entity_dictionary(ent_dict)
+
 						# For every key/value pair in the entity, see if there's a corresponding
 						# variable in the gdscript and set it.
-						for key in ent_dict:
+						for key in ent_dict.keys():
 							var string_value : String = ent_dict[key]
 							var value = string_value
 							if (key == "spawnflags"):
@@ -996,9 +1007,9 @@ static func mangle_string_to_basis(mangle_string : String) -> Basis:
 static func angle_string_to_basis(angle_string : String) -> Basis:
 	# Special case for up and down:
 	if (angle_string == "-1"): # Up, but Z is negative for forward, so we use DOWN
-		return Basis(Vector3.RIGHT, Vector3.FORWARD, Vector3.DOWN)
+		return Basis(Vector3.RIGHT, Vector3.BACK, Vector3.DOWN)
 	if (angle_string == "-2"): # Down, but Z is negative for forward, so we use UP
-		return Basis(Vector3.RIGHT, Vector3.BACK, Vector3.UP)
+		return Basis(Vector3.RIGHT, Vector3.FORWARD, Vector3.UP)
 	var angles := Vector3.ZERO
 	angles[1] = deg_to_rad(angle_string.to_float())
 	var basis := Basis.from_euler(angles)
