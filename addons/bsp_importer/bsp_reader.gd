@@ -3,8 +3,10 @@ extends Node
 class_name BSPReader
 
 const USE_TRIANGLE_COLLISION := false # To use convex collision, engine needs to support compute_convex_mesh_points
+const USE_BSPX_BRUSHES := true # If -wrbrushes is used, use the extra brush data for collision instead of the BSP tree collision.
+const TEST_BOX_ONLY_COLLISION := false # For performance testing using only boxes.
 # Documentation: https://docs.godotengine.org/en/latest/tutorials/plugins/editor/import_plugins.html
-
+const SINGLE_STATIC_BODY := true
 
 const CONTENTS_EMPTY := -1
 const CONTENTS_SOLID := -2
@@ -22,6 +24,7 @@ const CONTENTS_LAVA := -5
 #define CONTENTS_CURRENT_DOWN -14
 #define CONTENTS_TRANSLUCENT  -15
 
+const BSPX_NAME_LENGTH := 24
 
 const CLIPNODES_STRUCT_SIZE := (4 + 2 + 2) # 32bit int for plane index, 2 16bit children.
 const NODES_STRUCT_SIZE_Q1BSP := (4 + 2 + 2 + 2 * 6 + 2 + 2) # 32bit int for plane index, 2 16bit children.  bbox short, face id, face num
@@ -284,6 +287,7 @@ var generate_lightmap_uv2 := true
 var post_import_script_path : String
 var separate_mesh_on_grid := false
 var mesh_separation_grid_size := 256.0
+var bspx_model_to_brush_map := {}
 
 
 var inverse_scale_fac : float = 32.0:
@@ -306,6 +310,17 @@ func clear_data():
 	plane_normals = []
 	plane_distances = []
 	model_scenes = {}
+
+# To find the end of a block of l
+static func get_lumps_end(current_end : int, offset : int, length : int) -> int:
+	return max(current_end, offset + length)
+
+
+class BSPXBrush:
+	var mins : Vector3
+	var maxs : Vector3
+	var contents : int
+	var planes : Array[Plane]
 
 
 func read_bsp(source_file : String) -> Node:
@@ -354,45 +369,159 @@ func read_bsp(source_file : String) -> Node:
 		index_bits_32 = true
 	var entity_offset := file.get_32()
 	var entity_size := file.get_32()
+	# Need to figure out the end of the vanilla BSP data so that we can get the BSPX data.
+	var bsp_end := get_lumps_end(0, entity_offset, entity_size)
 	var planes_offset := file.get_32()
 	var planes_size := file.get_32()
+	bsp_end = get_lumps_end(bsp_end, planes_offset, planes_size)
 	var textures_offset := file.get_32() if has_textures else 0
 	var textures_size := file.get_32() if has_textures else 0
+	bsp_end = get_lumps_end(bsp_end, textures_offset, textures_size)
 	var verts_offset := file.get_32()
 	var verts_size := file.get_32()
+	bsp_end = get_lumps_end(bsp_end, verts_offset, verts_size)
 	var vis_offset := file.get_32()
 	var vis_size := file.get_32()
+	bsp_end = get_lumps_end(bsp_end, vis_offset, vis_size)
 	nodes_offset = file.get_32()
 	var nodes_size := file.get_32()
+	bsp_end = get_lumps_end(bsp_end, nodes_offset, nodes_size)
 	var texinfo_offset := file.get_32()
 	var texinfo_size := file.get_32()
+	bsp_end = get_lumps_end(bsp_end, texinfo_offset, texinfo_size)
 	var faces_offset := file.get_32()
 	var faces_size := file.get_32()
+	bsp_end = get_lumps_end(bsp_end, faces_offset, faces_size)
 	var lightmaps_offset := file.get_32()
 	var lightmaps_size := file.get_32()
+	bsp_end = get_lumps_end(bsp_end, lightmaps_offset, lightmaps_size)
 	var clipnodes_offset := file.get_32() if has_clipnodes else 0
 	var clipnodes_size := file.get_32() if has_clipnodes else 0
+	bsp_end = get_lumps_end(bsp_end, clipnodes_offset, clipnodes_size)
 	leaves_offset = file.get_32()
 	var leaves_size := file.get_32()
+	bsp_end = get_lumps_end(bsp_end, leaves_offset, leaves_size)
 	var listfaces_size := file.get_32()
 	var listfaces_offset := file.get_32()
-	var leaf_brush_table_offset := file.get_32() if has_brush_table else 0
+	bsp_end = get_lumps_end(bsp_end, listfaces_offset, listfaces_size)
+	var leaf_brush_table_offset := file.get_32() if has_brush_table else 0 # For Q2
 	var leaf_brush_table_size := file.get_32() if has_brush_table else 0
+	bsp_end = get_lumps_end(bsp_end, leaf_brush_table_offset, leaf_brush_table_size)
 	var edges_offset := file.get_32()
 	var edges_size := file.get_32()
+	bsp_end = get_lumps_end(bsp_end, edges_offset, edges_size)
 	var listedges_offset := file.get_32()
 	var listedges_size := file.get_32()
+	bsp_end = get_lumps_end(bsp_end, listedges_offset, listedges_size)
 	var models_offset := file.get_32()
 	var models_size := file.get_32()
+	bsp_end = get_lumps_end(bsp_end, models_offset, models_size)
 	# Q2-specific
 	var brushes_offset := file.get_32() if has_brush_table else 0
 	var brushes_size := file.get_32() if has_brush_table else 0
+	bsp_end = get_lumps_end(bsp_end, brushes_offset, brushes_size)
 	var brush_sides_offset := file.get_32() if has_brush_table else 0
 	var brush_sides_size := file.get_32() if has_brush_table else 0
+	bsp_end = get_lumps_end(bsp_end, brush_sides_offset, brush_sides_size)
 	# Pop
 	# Areas
 	# Area portals
 	
+	# BSPX support: https://github.com/fte-team/fteqw/blob/master/specs/bspx.txt
+	var has_bspx := false
+	var bspx_offset := bsp_end
+	# Needs to be aligned by 4.
+	bspx_offset = ((bspx_offset + 3) / 4) * 4
+	file.seek(bspx_offset)
+	var bspx_check := file.get_32()
+	var use_bspx_brushes := false
+	if (bspx_check == 1481659202): # "BSPX"
+		has_bspx = true
+		print("Has BSPX.")
+		var has_bspx_brushes := false
+		var bspx_brushes_offset := 0
+		var bspx_brushes_length := 0
+		#var file_out_test := FileAccess.open("user://test_bspx_out.txt", FileAccess.WRITE)
+		var num_bspx_entries := file.get_32()
+		#file_out_test.store_string("num entries: %d\n" % num_bspx_entries)
+		#file_out_test.flush()
+		for i in num_bspx_entries:
+			var entry_name := file.get_buffer(BSPX_NAME_LENGTH).get_string_from_ascii()
+			print("BSPX entry: ", entry_name)
+			if (entry_name == "BRUSHLIST"):
+				print("Has BSPX brush list.")
+				has_bspx_brushes = true
+				bspx_brushes_offset = file.get_32()
+				bspx_brushes_length = file.get_32()
+		if (has_bspx_brushes && USE_BSPX_BRUSHES):
+			use_bspx_brushes = true
+			var bytes_read := 0
+			file.seek(bspx_brushes_offset)
+			while (file.get_position() < file.get_length()): # Safer than while (true)
+				if (bytes_read >= bspx_brushes_length):
+					break
+				var version := file.get_32()
+				bytes_read += 4
+				#file_out_test.store_string("Version: %d\n" % version)
+				#file_out_test.flush()
+				if (version != 1):
+					print("Only BSPX brush version 1 supported. Version: ", version)
+					break
+				var model_num := file.get_32()
+				bytes_read += 4
+				#print("Model_num: ", model_num)
+				var get_whatever := bspx_model_to_brush_map.get(model_num)
+				var brush_array : Array[BSPXBrush] = []
+				if (get_whatever):
+					brush_array = get_whatever # WHY?!??!?!?!?!?!?!
+				#file_out_test.store_string("model_num: %d\n" % model_num)
+				#file_out_test.flush()
+				var num_brushes := file.get_32()
+				bytes_read += 4
+				#file_out_test.store_string("Num brushes: %d\n" % num_brushes)
+				#file_out_test.flush()
+				var num_planes_total := file.get_32()
+				bytes_read += 4
+				#file_out_test.store_string("Num planes total: %d\n" % num_planes_total)
+				#file_out_test.flush()
+				
+				for brush_index in num_brushes:
+					var bspx_brush := BSPXBrush.new()
+					var mins := read_vector_convert_scaled()
+					bytes_read += 3 * 4
+					var maxs := read_vector_convert_scaled()
+					bytes_read += 3 * 4
+					bspx_brush.mins = Vector3(minf(mins.x, maxs.x), minf(mins.y, maxs.y), minf(mins.z, maxs.z))
+					bspx_brush.maxs = Vector3(maxf(mins.x, maxs.x), maxf(mins.y, maxs.y), maxf(mins.z, maxs.z))
+					#file_out_test.store_string("mins: %f %f %f\n" % [bspx_brush.mins.x,bspx_brush.mins.y,bspx_brush.mins.z])
+					#file_out_test.flush()
+					#file_out_test.store_string("maxs: %f %f %f\n" % [bspx_brush.maxs.x,bspx_brush.maxs.y,bspx_brush.maxs.z])
+					#file_out_test.flush()
+					bspx_brush.contents = unsigned16_to_signed(file.get_16())
+					bytes_read += 2
+					#file_out_test.store_string("contents: %d\n" % bspx_brush.contents)
+					#file_out_test.flush()
+					var num_bspx_planes := file.get_16()
+					bytes_read += 2
+					#file_out_test.store_string("Num planes: %d\n" % num_bspx_planes)
+					#file_out_test.flush()
+					for plane_index in num_bspx_planes:
+						var normal := read_vector_convert_unscaled(file)
+						bytes_read += 3 * 4
+						var dist := file.get_float() * _unit_scale
+						bytes_read += 4
+						#file_out_test.store_string("dist: %f" % dist)
+						#file_out_test.flush()
+						var plane := Plane(normal, dist)
+						bspx_brush.planes.append(plane)
+					brush_array.append(bspx_brush)
+				bspx_model_to_brush_map[model_num] = brush_array
+			#print("bspx brushes: ", bspx_model_to_brush_map)
+	else:
+		print("Does not have BSPX.")
+	
+
+
 	# Read vertex data
 	var verts : PackedVector3Array
 	file.seek(verts_offset)
@@ -519,16 +648,17 @@ func read_bsp(source_file : String) -> Node:
 		slime_planes_array = []
 		lava_planes_array = []
 		var needs_import := false
-		var parent_node : Node3D
+		var parent_node : Node3D = root_node
 		var parent_inv_transform := Transform3D() # If a world model is rotated (such as a trigger) we want to keep things in the correct spot
 		var is_worldspawn := (model_index == 0)
 		if (is_worldspawn):
 			needs_import = true # Always import worldspawn.
-			var static_body := StaticBody3D.new()
-			static_body.name = "StaticBody"
-			root_node.add_child(static_body, true)
-			static_body.owner = root_node
-			parent_node = static_body
+			if (SINGLE_STATIC_BODY):
+				var static_body := StaticBody3D.new()
+				static_body.name = "StaticBody"
+				root_node.add_child(static_body, true)
+				static_body.owner = root_node
+				parent_node = static_body
 		if (model_scenes.has(model_index)):
 			needs_import = true # Import supported entities.
 			parent_node = model_scenes[model_index]
@@ -715,7 +845,14 @@ func read_bsp(source_file : String) -> Node:
 					mesh_instance.transform = parent_inv_transform
 					collision_shape.owner = root_node
 					# Apparently we have to let the gc handle this autamically now: file.close()
-			if (!USE_TRIANGLE_COLLISION): # Attempt to create collision out of BSP nodes
+			if (use_bspx_brushes && !USE_TRIANGLE_COLLISION):
+				var bspx_brushes := bspx_model_to_brush_map.get(model_index)
+				if (bspx_brushes):
+					#print("Number of brushes for model ", model_index, ": ", bspx_brushes.size())
+					create_collision_from_brushes(parent_node, bspx_brushes, parent_inv_transform)
+				else:
+					printerr("Could not find bspx collision for ", model_index)
+			elif (!USE_TRIANGLE_COLLISION): # Attempt to create collision out of BSP nodes
 				# Clear these out, as we may be importing multiple models.
 				array_of_planes_array = []
 				array_of_planes = []
@@ -742,13 +879,13 @@ func read_bsp(source_file : String) -> Node:
 				model_mins_maxs_planes.push_back(Plane(Vector3.DOWN, -model_mins.y))
 				model_mins_maxs_planes.push_back(Plane(Vector3.FORWARD, -model_mins.z))
 
-				# Create collision shapes for world
+				# Create collision shapes for world using BSP planes (we don't have brush data)
 				create_collision_shapes(parent_node, array_of_planes_array, model_mins_maxs_planes, parent_inv_transform)
 
 				# Create liquids (water, slime, lava)
-				create_liquid(parent_node, water_planes_array, model_mins_maxs_planes, parent_inv_transform, water_template_path)
-				create_liquid(parent_node, slime_planes_array, model_mins_maxs_planes, parent_inv_transform, slime_template_path)
-				create_liquid(parent_node, lava_planes_array, model_mins_maxs_planes, parent_inv_transform, lava_template_path)
+				create_liquid_from_planes(parent_node, water_planes_array, model_mins_maxs_planes, parent_inv_transform, water_template_path)
+				create_liquid_from_planes(parent_node, slime_planes_array, model_mins_maxs_planes, parent_inv_transform, slime_template_path)
+				create_liquid_from_planes(parent_node, lava_planes_array, model_mins_maxs_planes, parent_inv_transform, lava_template_path)
 	if (post_import_script_path):
 		var post_import_node := Node.new()
 		print("Loading post import script: ", post_import_script_path)
@@ -767,14 +904,16 @@ func read_bsp(source_file : String) -> Node:
 	#print("Post import nodes: ", post_import_nodes)
 	for node in post_import_nodes:
 		node.post_import(root_node)
-			
+
 	file.close()
 	file = null
 	print("BSP read complete.")
 	return root_node
 
 
-func create_liquid(parent_node : Node3D, planes_array : Array, model_mins_maxs_planes : Array[Plane], parent_inv_transform : Transform3D, template_path : String):
+# Traverse tree and create liquid.
+# Note: Not used if we have the brush data.
+func create_liquid_from_planes(parent_node : Node3D, planes_array : Array, model_mins_maxs_planes : Array[Plane], parent_inv_transform : Transform3D, template_path : String):
 	if (planes_array.size() > 0 && template_path):
 		var liquid_body : Node = load(template_path).instantiate()
 		parent_node.add_child(liquid_body, true)
@@ -1022,6 +1161,88 @@ static func angles_string_to_basis(angles_string : String) -> Basis:
 	return angles_string_to_basis_pyr(angles_string, true)
 
 
+func create_collision_from_brushes(parent : Node3D, brushes : Array[BSPXBrush], parent_inv_transform : Transform3D):
+	#print("create_collision_from_brushes\n")
+	var water_body : Node3D
+	var slime_body : Node3D
+	var lava_body : Node3D
+	var collision_index := 0
+	#print("Total brushes: ", brushes.size())
+	var brushes_added := 0
+	for brush in brushes:
+		collision_index += 1
+		var aabb := AABB(brush.mins, Vector3.ZERO)
+		aabb = aabb.expand(brush.maxs)
+		var center := aabb.get_center()
+		var body_to_add_to : Node3D = parent
+		if (brush.contents == CONTENTS_SOLID):
+			if (!SINGLE_STATIC_BODY):
+				var static_body_child := StaticBody3D.new()
+				static_body_child.name = "StaticBody%d" % collision_index
+				#static_body_child.transform = collision_shape.transform
+				#collision_shape.transform = Transform3D()
+				parent.add_child(static_body_child, true)
+				static_body_child.owner = root_node
+				body_to_add_to = static_body_child
+		elif (brush.contents == CONTENTS_WATER):
+			if (!water_body):
+				water_body = load(water_template_path).instantiate()
+				parent.add_child(water_body)
+				water_body.owner = root_node
+			body_to_add_to = water_body
+			print("water body ", water_body)
+		elif (brush.contents == CONTENTS_SLIME):
+			if (!slime_body):
+				slime_body = load(slime_template_path).instantiate()
+				parent.add_child(slime_body)
+				slime_body.owner = root_node
+			body_to_add_to = slime_body
+		elif (brush.contents == CONTENTS_LAVA):
+			if (!lava_body):
+				lava_body = load(lava_template_path).instantiate()
+				parent.add_child(lava_body)
+				lava_body.owner = root_node
+			body_to_add_to = lava_body
+		else:
+			print("Unknown brush contents: ", brush.contents)
+		if (brush.planes.size() == 0): # If it's just an AABB, we can use a box.
+			var collision_shape := CollisionShape3D.new()
+			collision_shape.name = "CollisionBox%d" % collision_index
+			var box := BoxShape3D.new()
+			box.size = aabb.size
+			collision_shape.position = center
+			collision_shape.shape = box
+			body_to_add_to.add_child(collision_shape)
+			brushes_added += 1
+			collision_shape.owner = root_node
+			collision_shape.transform = parent_inv_transform * collision_shape.transform
+		else: # Planes.  Can't do a simple box (Though maybe it could be a rotated box?)
+			var planes := brush.planes
+			planes.push_back(Plane(Vector3.RIGHT, brush.maxs.x))
+			planes.push_back(Plane(Vector3.UP, brush.maxs.y))
+			planes.push_back(Plane(Vector3.BACK, brush.maxs.z))
+			planes.push_back(Plane(Vector3.LEFT, -brush.mins.x))
+			planes.push_back(Plane(Vector3.DOWN, -brush.mins.y))
+			planes.push_back(Plane(Vector3.FORWARD, -brush.mins.z))
+			var convex_points := convert_planes_to_points(planes)
+			if (convex_points.size() < 3):
+				print("Convex shape creation failed ", collision_index)
+			else:
+				var collision_shape := CollisionShape3D.new()
+				#print("Convex planes: ", convex_planes)
+				collision_shape.name = "Collision%d" % collision_index
+				collision_shape.shape = ConvexPolygonShape3D.new()
+				for point_index in convex_points.size():
+					convex_points[point_index] -= center
+				collision_shape.shape.points = convex_points
+				collision_shape.position = center
+				collision_shape.transform = parent_inv_transform * collision_shape.transform
+				#print("Convex points: ", convex_points)
+				body_to_add_to.add_child(collision_shape)
+				brushes_added += 1
+				collision_shape.owner = root_node
+	#print("Brushes added: ", brushes_added)
+
 func create_collision_shapes(body : Node3D, planes_array, model_mins_maxs_planes, parent_inv_transform : Transform3D):
 	#print("Create collision shapes.")
 	for i in planes_array.size():
@@ -1041,11 +1262,35 @@ func create_collision_shapes(body : Node3D, planes_array, model_mins_maxs_planes
 			var collision_shape := CollisionShape3D.new()
 			#print("Convex planes: ", convex_planes)
 			collision_shape.name = "Collision%d" % i
-			collision_shape.shape = ConvexPolygonShape3D.new()
-			collision_shape.shape.points = convex_points
-			collision_shape.transform = parent_inv_transform
+			var center := Vector3.ZERO
+			for point in convex_points:
+				center += point
+			center /= convex_points.size()
+			if (TEST_BOX_ONLY_COLLISION):
+				var aabb := AABB(convex_points[0], Vector3.ZERO)
+				for point in convex_points:
+					aabb = aabb.expand(point)
+				var box_shape := BoxShape3D.new()
+				box_shape.size = abs(aabb.size)
+				collision_shape.shape = box_shape
+			else:
+				collision_shape.shape = ConvexPolygonShape3D.new()
+				for point_index in convex_points.size():
+					convex_points[point_index] -= center
+				collision_shape.shape.points = convex_points
+			collision_shape.position = center
+			collision_shape.transform = parent_inv_transform * collision_shape.transform
 			#print("Convex points: ", convex_points)
-			body.add_child(collision_shape, true)
+			if (SINGLE_STATIC_BODY):
+				body.add_child(collision_shape)
+			else:
+				var static_body := StaticBody3D.new()
+				static_body.name = "StaticBody%d" % i
+				static_body.transform = collision_shape.transform
+				collision_shape.transform = Transform3D()
+				body.add_child(static_body, true)
+				static_body.owner = root_node
+				static_body.add_child(collision_shape)
 			collision_shape.owner = root_node
 
 
