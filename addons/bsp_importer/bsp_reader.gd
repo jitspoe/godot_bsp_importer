@@ -116,14 +116,14 @@ class BSPTexture:
 	var is_transparent := false
 	static func get_data_size() -> int:
 		return 40 # 16 + 4 * 6
-	func read_texture(file : FileAccess, material_path_pattern : String, texture_material_rename : Dictionary) -> int:
+	func read_texture(file : FileAccess, material_path_pattern : String, texture_material_rename : Dictionary, transparent_texture_prefix:String, generate_texture_materials:bool) -> int:
 		name = file.get_buffer(16).get_string_from_ascii()
 		if (name.begins_with("*")):
 			name = name.substr(1)
 			is_warp = true
 			is_transparent = true
 		if (name.begins_with(transparent_texture_prefix)):
-			name = name.substr(transparent_texture_prefix.length)
+			name = name.substr(transparent_texture_prefix.length())
 			is_transparent = true
 		width = file.get_32()
 		height = file.get_32()
@@ -621,7 +621,7 @@ func read_bsp(source_file : String) -> Node:
 			var complete_offset := textures_offset + texture_offset
 			file.seek(complete_offset)
 			textures[i] = BSPTexture.new()
-			textures[i].read_texture(file, material_path_pattern, texture_material_rename)
+			textures[i].read_texture(file, material_path_pattern, texture_material_rename, transparent_texture_prefix, generate_texture_materials)
 		#print("texture: ", textures[i].name, " ", textures[i].width, "x", textures[i].height)
 
 	# UV stuff
@@ -1019,7 +1019,7 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 				if (entity_remap.has(classname)): scene_path = entity_remap[classname]
 			else:
 				if (classname != WORLDSPAWN_STRING_NAME): scene_path = entity_path_pattern.replace("{classname}", classname)
-			if scene_resource != "":
+			if scene_path != "":
 				var scene_resource = load(scene_path)
 				if (!scene_resource):
 					print("Failed to load ", scene_path)
