@@ -64,6 +64,10 @@ func _get_import_options(_path : String, preset_index : int):
 				"default_value" : "res://materials/{texture_name}_material.tres"
 			},
 			{
+				"name" : "transparent_texture_prefix",
+				"default_value" : "{"
+			},
+			{
 				"name" : "texture_material_rename",
 				"default_value" : { "texture_name1" : "res://material/texture_name1_material.tres" }
 			},
@@ -80,8 +84,16 @@ func _get_import_options(_path : String, preset_index : int):
 				"default_value" : "res://addons/bsp_importer/lava_example_template.tscn"
 			},
 			{
+				"name" : "entity_path_pattern",
+				"default_value" : "res://entities/{classname}.tscn"
+			},
+			{
 				"name" : "entity_remap",
 				"default_value" : { &"trigger_example" : "res://triggers/trigger_example.tres" }
+			},
+			{
+				"name" : "use_entity_remap",
+				"default_value" : false
 			},
 			{
 				"name" : "entity_offsets_quake_units",
@@ -110,6 +122,14 @@ func _get_import_options(_path : String, preset_index : int):
 				"default_value" : false
 			},
 			{
+				"name" : "use_triangle_collision",
+				"default_value" : false
+			},
+			{
+				"name" : "generate_texture_materials",
+				"default_value" : true
+			},
+			{
 				"name" : "mesh_separation_grid_size",
 				"default_value" : 256.0
 			},
@@ -128,6 +148,8 @@ func _get_option_visibility(_option, _options, _unknown_dictionary):
 func _import(source_file : String, save_path : String, options : Dictionary, r_platform_variants, r_gen_files):
 	var bsp_reader := BSPReader.new()
 	bsp_reader.material_path_pattern = options["material_path_pattern"]
+	bsp_reader.entity_path_pattern = options["entity_path_pattern"]
+	bsp_reader.transparent_texture_prefix = options["transparent_texture_prefix"]
 	bsp_reader.water_template_path = options["water_scene_template"]
 	bsp_reader.slime_template_path = options["slime_scene_template"]
 	bsp_reader.lava_template_path = options["lava_scene_template"]
@@ -139,7 +161,10 @@ func _import(source_file : String, save_path : String, options : Dictionary, r_p
 	bsp_reader.texture_material_rename = options.texture_material_rename
 	bsp_reader.import_lights = options["import_lights"]
 	bsp_reader.generate_occlusion_culling = options["generate_occlusion_culling"]
+	bsp_reader.use_triangle_collision = options["use_triangle_collision"]
 	bsp_reader.generate_shadow_mesh = false# Not fully implemented, yet options["generate_shadow_mesh"]
+	bsp_reader.use_entity_remap = options["use_entity_remap"]
+	bsp_reader.generate_texture_materials = options["generate_texture_materials"]
 	bsp_reader.culling_textures_exclude = options.culling_textures_exclude
 	bsp_reader.post_import_script_path = options["post_import_script"]
 

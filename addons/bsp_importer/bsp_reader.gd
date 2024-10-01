@@ -2,7 +2,6 @@ extends Node
 
 class_name BSPReader
 
-const USE_TRIANGLE_COLLISION := false # To use convex collision, engine needs to support compute_convex_mesh_points
 const USE_BSPX_BRUSHES := true # If -wrbrushes is used, use the extra brush data for collision instead of the BSP tree collision.
 const TEST_BOX_ONLY_COLLISION := false # For performance testing using only boxes.
 # Documentation: https://docs.godotengine.org/en/latest/tutorials/plugins/editor/import_plugins.html
@@ -123,8 +122,8 @@ class BSPTexture:
 			name = name.substr(1)
 			is_warp = true
 			is_transparent = true
-		if (name.begins_with("{")):
-			name = name.substr(1)
+		if (name.begins_with(transparent_texture_prefix)):
+			name = name.substr(transparent_texture_prefix.length)
 			is_transparent = true
 		width = file.get_32()
 		height = file.get_32()
@@ -139,8 +138,16 @@ class BSPTexture:
 			if (width != 0 && height != 0): # Temp hack for nonexistent textures.
 				material = load(material_path)
 			if (!material):
-				material = StandardMaterial3D.new()
-				material.albedo_color = Color(randf_range(0.0, 1.0), randf_range(0.0, 1.0), randf_range(0.0, 1.0))
+				var png_path = material_path.replace(".tres", ".png");
+				if ResourceLoader.exists(png_path) and generate_texture_materials:
+					material = StandardMaterial3D.new()
+					material.albedo_texture = load(png_path)
+					material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+					material.diffuse_mode = BaseMaterial3D.DIFFUSE_LAMBERT_WRAP
+					ResourceSaver.save(material, material_path)
+				else:
+					material = StandardMaterial3D.new()
+					material.albedo_color = Color(randf_range(0.0, 1.0), randf_range(0.0, 1.0), randf_range(0.0, 1.0))
 		file.get_32() # for mip levels
 		file.get_32() # for mip levels
 		file.get_32() # for mip levels
@@ -260,6 +267,8 @@ func read_vector_convert_scaled() -> Vector3:
 
 var error := ERR_UNCONFIGURED
 var material_path_pattern : String
+var transparent_texture_prefix : String
+var entity_path_pattern : String
 var water_template_path : String
 var slime_template_path : String
 var lava_template_path : String
@@ -283,10 +292,13 @@ var _unit_scale : float = 1.0
 var import_lights := true
 var generate_occlusion_culling := true
 var generate_shadow_mesh := false
+var use_triangle_collision := false
+var use_entity_remap := true
 var culling_textures_exclude : Array[StringName]
 var generate_lightmap_uv2 := true
 var post_import_script_path : String
 var separate_mesh_on_grid := false
+var generate_texture_materials := false
 var mesh_separation_grid_size := 256.0
 var bspx_model_to_brush_map := {}
 
@@ -868,7 +880,7 @@ func read_bsp(source_file : String) -> Node:
 						var err = mesh_instance.mesh.lightmap_unwrap(mesh_instance.global_transform, _unit_scale * 4.0)
 						#print("Lightmap unwrap result: ", err)
 
-				if (USE_TRIANGLE_COLLISION):
+				if (use_triangle_collision):
 					var collision_shape := CollisionShape3D.new()
 					collision_shape.name = "CollisionShape"
 					collision_shape.shape = mesh_instance.mesh.create_trimesh_shape()
@@ -876,14 +888,14 @@ func read_bsp(source_file : String) -> Node:
 					mesh_instance.transform = parent_inv_transform
 					collision_shape.owner = root_node
 					# Apparently we have to let the gc handle this autamically now: file.close()
-			if (use_bspx_brushes && !USE_TRIANGLE_COLLISION):
+			if (use_bspx_brushes && !use_triangle_collision):
 				var bspx_brushes := bspx_model_to_brush_map.get(model_index)
 				if (bspx_brushes):
 					#print("Number of brushes for model ", model_index, ": ", bspx_brushes.size())
 					create_collision_from_brushes(parent_node, bspx_brushes, parent_inv_transform)
 				else:
 					printerr("Could not find bspx collision for ", model_index)
-			elif (!USE_TRIANGLE_COLLISION): # Attempt to create collision out of BSP nodes
+			elif (!use_triangle_collision): # Attempt to create collision out of BSP nodes
 				# Clear these out, as we may be importing multiple models.
 				array_of_planes_array = []
 				array_of_planes = []
@@ -1001,9 +1013,13 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 		if (ent_dict.has("classname")):
 			var classname : StringName = ent_dict["classname"].to_lower()
 			#print("Classname: ", classname)
-			if (entity_remap.has(classname)):
-				var scene_path : String = entity_remap[classname]
-				print("Remapping ", classname, " to ", scene_path)
+			var scene_path : String = ""
+			if use_entity_remap:
+				classname = classname.to_lower()
+				if (entity_remap.has(classname)): scene_path = entity_remap[classname]
+			else:
+				if (classname != WORLDSPAWN_STRING_NAME): scene_path = entity_path_pattern.replace("{classname}", classname)
+			if scene_resource != "":
 				var scene_resource = load(scene_path)
 				if (!scene_resource):
 					print("Failed to load ", scene_path)
