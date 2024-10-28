@@ -30,6 +30,8 @@ func _get_save_extension():
 func _get_resource_type():
 	return "PackedScene"
 
+func _can_import_threaded():
+	return false
 
 enum Presets { DEFAULT }
 
