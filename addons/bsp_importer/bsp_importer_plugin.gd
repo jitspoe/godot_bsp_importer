@@ -31,6 +31,10 @@ func _get_resource_type():
 	return "PackedScene"
 
 
+func _can_import_threaded():
+	return false
+
+
 enum Presets { DEFAULT }
 
 
@@ -77,7 +81,6 @@ func _get_import_options(_path : String, preset_index : int):
 				"name" : "entity_remap",
 				"default_value" : { &"trigger_example" : "res://triggers/trigger_example.tres" }
 			},
-			## Can we have tooltips here?
 			{
 				"name" : "entity_offsets_quake_units",
 				"default_value" : { &"example_offset_entity" : Vector3(16, 16, 0) }
@@ -90,6 +93,12 @@ func _get_import_options(_path : String, preset_index : int):
 				"name" : "generate_occlusion_culling",
 				"default_value" : true
 			},
+			# This doesn't work properly, yet.
+			#{
+				### Generates an optimized mesh for shadow rendering (single material, merged verts)
+				#"name" : "generate_shadow_mesh",
+				#"default_value" : true
+			#},
 			{
 				"name" : "culling_textures_exclude",
 				"default_value" : [] as Array[StringName]
@@ -114,7 +123,7 @@ func _get_option_visibility(_option, _options, _unknown_dictionary):
 	return true
 
 
-func _import(source_file : String, save_path : String, options, r_platform_variants, r_gen_files):
+func _import(source_file : String, save_path : String, options : Dictionary, r_platform_variants, r_gen_files):
 	var bsp_reader := BSPReader.new()
 	bsp_reader.material_path_pattern = options["material_path_pattern"]
 	bsp_reader.water_template_path = options["water_scene_template"]
@@ -128,6 +137,7 @@ func _import(source_file : String, save_path : String, options, r_platform_varia
 	bsp_reader.texture_material_rename = options.texture_material_rename
 	bsp_reader.import_lights = options["import_lights"]
 	bsp_reader.generate_occlusion_culling = options["generate_occlusion_culling"]
+	bsp_reader.generate_shadow_mesh = false# Not fully implemented, yet options["generate_shadow_mesh"]
 	bsp_reader.culling_textures_exclude = options.culling_textures_exclude
 	bsp_reader.post_import_script_path = options["post_import_script"]
 
@@ -143,4 +153,3 @@ func _import(source_file : String, save_path : String, options, r_platform_varia
 
 	print("Saving to %s.%s" % [save_path, _get_save_extension()])
 	return ResourceSaver.save(packed_scene, "%s.%s" % [save_path, _get_save_extension()])
-

@@ -282,6 +282,7 @@ var is_bsp2 := false
 var _unit_scale : float = 1.0
 var import_lights := true
 var generate_occlusion_culling := true
+var generate_shadow_mesh := false
 var culling_textures_exclude : Array[StringName]
 var generate_lightmap_uv2 := true
 var post_import_script_path : String
@@ -643,6 +644,7 @@ func read_bsp(source_file : String) -> Node:
 	var previous_tex_name := "UNSET"
 
 	for model_index in num_models:
+		#print("Model index ", model_index)
 		var mesh_grid := {} # Dictionary of surface tools where the key is an integer vector3.
 		water_planes_array = [] # Clear that out so water isn't duplicated for each mesh.
 		slime_planes_array = []
@@ -779,6 +781,7 @@ func read_bsp(source_file : String) -> Node:
 
 			# Create meshes for each cell in the mesh grid.
 			for grid_index in mesh_grid:
+				#print("Grid...")
 				var surface_tools = mesh_grid[grid_index] # Is there a way to loop through the keys instead?
 				var mesh_instance := MeshInstance3D.new()
 				var array_mesh : ArrayMesh = null
@@ -790,12 +793,11 @@ func read_bsp(source_file : String) -> Node:
 					if (culling_textures_exclude.has(texture_name)):
 						#array_mesh_no_cull = surf_tool.commit(array_mesh_no_cull)
 						has_nocull_materials = true
-						print("Has no-cull materials")
+						#print("Has no-cull materials")
 					else:
 						array_mesh = surf_tool.commit(array_mesh)
 
 				if (array_mesh || has_nocull_materials):
-					mesh_instance.mesh = array_mesh
 					mesh_instance.name = "Mesh"
 					parent_node.add_child(mesh_instance, true)
 					mesh_instance.transform = parent_inv_transform
@@ -806,7 +808,7 @@ func read_bsp(source_file : String) -> Node:
 						var vertices := PackedVector3Array()
 						var indices := PackedInt32Array()
 						# Build occlusion from all surfaces of the array mesh.
-						for i in range(0, array_mesh.get_surface_count()):
+						for i in array_mesh.get_surface_count():
 							var offset = vertices.size()
 							var arrays := array_mesh.surface_get_arrays(i)
 							vertices.append_array(arrays[ArrayMesh.ARRAY_VERTEX])
@@ -824,15 +826,44 @@ func read_bsp(source_file : String) -> Node:
 						mesh_instance.add_child(occluder_instance, true)
 						occluder_instance.owner = root_node
 
+					var shadow_mesh : ArrayMesh = null
+					if (generate_shadow_mesh):
+						print("Generating shadow mesh...")
+						# TODO: Merge verts.
+						# Ideally create_shadow_mesh() from the engine could be exposed and placed on the ArrayMesh class.
+						var vertices := PackedVector3Array()
+						var indices := PackedInt32Array()
+						for i in array_mesh.get_surface_count():
+							var offset = vertices.size()
+							var arrays := array_mesh.surface_get_arrays(i)
+							vertices.append_array(arrays[ArrayMesh.ARRAY_VERTEX])
+							if arrays[ArrayMesh.ARRAY_INDEX] == null:
+								indices.append_array(range(offset, offset + arrays[ArrayMesh.ARRAY_VERTEX].size()))
+							else:
+								for index in arrays[ArrayMesh.ARRAY_INDEX]:
+									indices.append(index + offset)
+						if (indices.size() >= 3): # Make sure we have at least 1 face.
+							shadow_mesh = ArrayMesh.new()
+							var mesh_arrays := []
+							mesh_arrays.resize(ArrayMesh.ARRAY_MAX)
+							indices.resize(3) # TESTING
+							mesh_arrays[ArrayMesh.ARRAY_VERTEX] = vertices
+							mesh_arrays[ArrayMesh.ARRAY_INDEX] = indices
+							shadow_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, mesh_arrays, [], {}, ArrayMesh.ArrayFormat.ARRAY_FORMAT_VERTEX)
+
 					# Add non-occluding materials to the mesh after we've generated occlusion
 					if (has_nocull_materials):
-						print("Yep.")
 						for texture_name in surface_tools:
 							if (culling_textures_exclude.has(texture_name)):
 								var surf_tool : SurfaceTool = surface_tools[texture_name]
 								array_mesh = surf_tool.commit(array_mesh)
-						mesh_instance.mesh = array_mesh
 
+					array_mesh.shadow_mesh = shadow_mesh # This will be null if generate_shadow_mesh isn't set.
+					mesh_instance.mesh = array_mesh
+					#print("Shadow mesh: ", shadow_mesh.get_surface_count(), ", ", shadow_mesh.get_faces())
+					if (shadow_mesh):
+						print("Shadow mesh: ", shadow_mesh.get_surface_count())
+					
 					if (generate_lightmap_uv2):
 						var err = mesh_instance.mesh.lightmap_unwrap(mesh_instance.global_transform, _unit_scale * 4.0)
 						#print("Lightmap unwrap result: ", err)
