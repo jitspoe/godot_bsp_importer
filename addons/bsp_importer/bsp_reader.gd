@@ -114,46 +114,265 @@ class BSPTexture:
 	var material : Material
 	var is_warp := false
 	var is_transparent := false
+	static var default_palette : PackedByteArray = []
+
 	static func get_data_size() -> int:
 		return 40 # 16 + 4 * 6
-	func read_texture(file : FileAccess, material_path_pattern : String, texture_material_rename : Dictionary, transparent_texture_prefix:String, generate_texture_materials:bool) -> int:
+
+	func read_texture(file : FileAccess, reader : BSPReader) -> int:
+		var texture_header_file_offset := file.get_position()
 		name = file.get_buffer(16).get_string_from_ascii()
 		if (name.begins_with("*")):
 			name = name.substr(1)
 			is_warp = true
 			is_transparent = true
-		if (name.begins_with(transparent_texture_prefix)):
-			name = name.substr(transparent_texture_prefix.length())
+		if (name.begins_with(reader.transparent_texture_prefix)):
+			name = name.substr(reader.transparent_texture_prefix.length())
 			is_transparent = true
 		width = file.get_32()
 		height = file.get_32()
+		var texture_data_offset := BSPReader.unsigned32_to_signed(file.get_32())
+		if (texture_data_offset > 0):
+			texture_data_offset += texture_header_file_offset
+		file.get_32() # for mip levels
+		file.get_32() # for mip levels
+		file.get_32() # for mip levels
 		name = name.to_lower()
+		var current_file_offset = file.get_position()
 		print("texture: ", name, " width: ", width, " height: ", height)
-		var material_path : String
-		if (texture_material_rename.has(name)):
-			material_path = texture_material_rename[name]
-		else:
-			material_path = material_path_pattern.replace("{texture_name}", name)
-		if (name != "skip" && name != "trigger" && name != "waterskip" && name != "slimeskip"):
-			if (width != 0 && height != 0): # Temp hack for nonexistent textures.
-				material = load(material_path)
-			if (!material):
-				var png_path = material_path.replace(".tres", ".png");
-				if ResourceLoader.exists(png_path) and generate_texture_materials:
+		if (name != &"skip" && name != &"trigger" && name != &"waterskip" && name != &"slimeskip"):
+			var material_path : String
+			if (reader.texture_material_rename.has(name)):
+				material_path = reader.texture_material_rename[name]
+			else:
+				material_path = reader.material_path_pattern.replace("{texture_name}", name)
+			var image_path : String
+			var texture : Texture2D = null
+			var texture_emission : Texture2D = null
+			var need_to_save_image := false
+			if (reader.texture_path_remap.has(name)):
+				image_path = reader.texture_path_remap[name]
+			else:
+				image_path = reader.texture_path_pattern.replace("{texture_name}", name)
+			if (ResourceLoader.exists(image_path)):
+				texture = load(image_path)
+				if (texture):
+					width = texture.get_width()
+					height = texture.get_height()
+					print("External image width: ", width, " height: ", height)
+			var image_emission_path : String
+			image_emission_path = reader.texture_emission_path_pattern.replace("{texture_name}", name)
+			if (ResourceLoader.exists(image_emission_path)):
+				texture_emission = load(image_emission_path)
+			material = load(material_path)
+			if (material && !reader.overwrite_existing_materials):
+				# Try to get the width and height off of the material.
+				if (width == 0 || height == 0):
+					print("Texture size is 0.  Attempting to get texture size from material.")
+					if (material is BaseMaterial3D):
+						print("Attempting to get image size from base material.")
+						texture = material.albedo_texture
+					elif (material is ShaderMaterial):
+						var parameters_to_check : PackedStringArray = [ "albedo_texture", "texture_albedo", "texture", "albedo", "texture_diffuse" ]
+						for param_name in parameters_to_check:
+							# Might not exist/be a texture, so we need to test for htat.
+							var test = material.get_shader_parameter(param_name)
+							if (test is Texture2D):
+								print("Got ", param_name, " from ShaderMaterial.")
+								texture = test
+								break
+						if (!texture):
+							print("No texture found in shader material with these parameters: ", parameters_to_check)
+					if (texture):
+						width = texture.get_width()
+						height = texture.get_height()
+						print("Material texture width: ", width, " height: ", height)
+					else:
+						print("No texture found in material.")
+			else: # Need to create a material.
+				print("Need to create a material.")
+				var image : Image = null
+				var image_emission : Image = null
+				if (!texture || reader.overwrite_existing_textures): # Try creating image from the texture in the BSP file.
+					var palette : PackedByteArray = []
+					var palette_file := FileAccess.open(reader.texture_palette_path, FileAccess.READ)
+					if (palette_file):
+						palette = palette_file.get_buffer(256 * 3)
+					else: # No palette, load default palette.
+						print("Could not load palette file: ", reader.texture_palette_path, ".  loading built-in palette.")
+						palette = generate_default_palette()
+					if (texture_data_offset > 0):
+						print("Reading texture from bsp file at ", texture_data_offset)
+						file.seek(texture_data_offset)
+						var num_pixels := width * height
+						var image_data : PackedByteArray = []
+						var image_data_emission : PackedByteArray = []
+						image_data.resize(num_pixels * 3)
+						var has_emission := false
+						var image_cursor := 0
+						for pixel_index in num_pixels:
+							var indexed_color := file.get_8()
+							if (is_fullbright_index(indexed_color, reader)):
+								if (!has_emission):
+									has_emission = true
+									image_data_emission.resize(num_pixels * 3)
+								# If it's fullbright, write the color to emission and black to albedo.
+								image_data[image_cursor] = 0
+								image_data_emission[image_cursor] = palette[indexed_color * 3 + 0] # Sir_Kane thought it was disguisting that I didn't have a + 0 here.
+								image_cursor += 1
+								image_data[image_cursor] = 0
+								image_data_emission[image_cursor] = palette[indexed_color * 3 + 1]
+								image_cursor += 1
+								image_data[image_cursor] = 0
+								image_data_emission[image_cursor] = palette[indexed_color * 3 + 2]
+								image_cursor += 1
+							else: # Not fullbright
+								image_data[image_cursor] = palette[indexed_color * 3 + 0] # Sir_Kane thought it was disguisting that I didn't have a + 0 here.
+								image_cursor += 1
+								image_data[image_cursor] = palette[indexed_color * 3 + 1]
+								image_cursor += 1
+								image_data[image_cursor] = palette[indexed_color * 3 + 2]
+								image_cursor += 1
+						image = Image.create_from_data(width, height, false, Image.FORMAT_RGB8, image_data)
+						image.generate_mipmaps()
+						if (has_emission):
+							image_emission = Image.create_from_data(width, height, false, Image.FORMAT_RGB8, image_data_emission)
+							image_emission.generate_mipmaps()
+						texture = ImageTexture.create_from_image(image)
+						need_to_save_image = true
+						file.seek(current_file_offset) # Go back to where we were, in case that matters for reading the next texture.
+					else:
+						print("No texture data in BSP file.")
+				if (texture && reader.generate_texture_materials):
+					print("Creating material with texture.")
 					material = StandardMaterial3D.new()
-					material.albedo_texture = load(png_path)
+					material.albedo_texture = texture
+					#print("albedo_texture set to ", material.albedo_texture)
+					if (image_emission):
+						texture_emission = ImageTexture.create_from_image(image_emission)
+					print("texture_emission = ", texture_emission)
+					if (texture_emission):
+						print("Emission enabled.")
+						material.emission_enabled = true
+						material.emission_texture = texture_emission
 					material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-					material.diffuse_mode = BaseMaterial3D.DIFFUSE_LAMBERT_WRAP
-					ResourceSaver.save(material, material_path)
+					material.diffuse_mode = BaseMaterial3D.DIFFUSE_BURLEY
+					material.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+					if (reader.save_separate_materials): # Write materials
+						print("Save separate materials.")
+						# Write texture if it wasn't in the project.
+						if (image && need_to_save_image):
+							image_path = str(image_path.get_basename(), ".png") # Make sure images we write have png extension
+							print("Writing image to ", image_path)
+							# Create image directory if it doesn't exist
+							var image_dir := image_path.get_base_dir()
+							if (!DirAccess.dir_exists_absolute(image_dir)):
+								DirAccess.make_dir_recursive_absolute(image_dir)
+							var err := image.save_png(image_path)
+							if (err != OK):
+								printerr("Failed to write to ", image_path, " (", err, ")")
+							else:
+								#material.albedo_texture = load(image_path) # Swap out generated texture with reference to file.
+								#if (material.albedo_texture):
+								#	print("Assigning albedo_texture to ", image_path)
+								#else:
+								#	printerr("Failed to load ", image_path)
+								material.albedo_texture.resource_path = image_path
+								#material.albedo_texture = ResourceLoader.load(image_path, "image")
+							if (image_emission):
+								image_emission_path = str(image_emission_path.get_basename(), ".png") # Make sure we use the png extenison.
+								err = image_emission.save_png(image_emission_path)
+								if (err == OK):
+									#material.emission_texture = load(image_emission_path)
+									material.emission_texture.resource_path = image_emission_path
+									#material.emission_texture = ResourceLoader.load(image_emission_path, "image")
+								else:
+									printerr("Failed to write to ", image_emission_path, " (", err, ")")
+									
+						# Create directory if it doesn't exist
+						var material_dir := material_path.get_base_dir()
+						if (!DirAccess.dir_exists_absolute(material_dir)):
+							DirAccess.make_dir_recursive_absolute(material_dir)
+						var err := ResourceSaver.save(material, material_path) # Note: If we do map loading from within the game, we don't want to save this.
+						if (err == OK):
+							print("Wrote material: ", material_path)
+							#print("Emission enabled: ", material.emission_enabled)
+							#print("Emission tex: ", material.emission_texture)
+							#material.resource_path = material_path
+							material.take_over_path(material_path) # Not sure why setting resource_path here doesn't save a reference to the resource.
+							#material = load(material_path)
+							#print("Emission enabled: ", material.emission_enabled)
+							#print("Emission tex: ", material.emission_texture)
+						else:
+							printerr("Failed to write to ", material_path)
 				else:
-					material = StandardMaterial3D.new()
-					material.albedo_color = Color(randf_range(0.0, 1.0), randf_range(0.0, 1.0), randf_range(0.0, 1.0))
-		file.get_32() # for mip levels
-		file.get_32() # for mip levels
-		file.get_32() # for mip levels
-		file.get_32() # for mip levels
+					if (material):
+						print("Material with no texture image.")
+					if (!material):
+						print("No texture found.  Assigning random color.")
+						material = StandardMaterial3D.new()
+						material.albedo_color = Color(randf_range(0.0, 1.0), randf_range(0.0, 1.0), randf_range(0.0, 1.0))
 		return get_data_size()
 
+	func is_fullbright_index(index : int, reader : BSPReader) -> bool:
+		if (reader.fullbright_range.size() == 0):
+			return false
+		if (index >= reader.fullbright_range[0]):
+			if (reader.fullbright_range.size() > 1):
+				if (index <= reader.fullbright_range[1]):
+					return true
+			else:
+				return true
+		return false
+
+	func lerp_palette_range(start_index : int, end_index : int, start_color : Color, end_color : Color):
+		var total := end_index - start_index + 1
+		var byte_index := start_index * 3
+		for i in total:
+			var fraction := float(i) / float(total)
+			var color := start_color.lerp(end_color, fraction)
+			default_palette[byte_index] = int(roundf(color.r * 255))
+			byte_index += 1
+			default_palette[byte_index] = int(roundf(color.g * 255))
+			byte_index += 1
+			default_palette[byte_index] = int(roundf(color.b * 255))
+			byte_index += 1
+
+	func generate_default_palette():
+		if (default_palette.size() == 0):
+			default_palette.resize(256 * 3)
+			for i in (256 * 3):
+				default_palette[i] = ((i * 256) / (256 * 3))
+			# Generate an approximation of the Quake palette.  Supposedly it's public domain, but just to be safe, I'm doing my own thing:
+			var index := 0
+			lerp_palette_range(0, 15, Color.BLACK, Color(0.92, 0.92, 0.92))
+			lerp_palette_range(16, 31, Color(0.06, 0.04, 0.03), Color(0.56, 0.44, 0.14))
+			lerp_palette_range(32, 47, Color(0.04, 0.04, 0.06), Color(0.55, 0.55, 0.8))
+			lerp_palette_range(48, 63, Color.BLACK, Color(0.42, 0.42, 0.06))
+			lerp_palette_range(64, 79, Color(0.03, 0.0, 0.0), Color(0.5, 0.0, 0.0)) # reds
+			lerp_palette_range(80, 95, Color(0.07, 0.07, 0.0), Color(0.69, 0.40, 0.14)) # dark green to light brown
+			lerp_palette_range(96, 103, Color(0.14, 0.07, 0.03), Color(0.5, 0.23, 0.17)) # brown to yellow 1 (gold)
+			lerp_palette_range(104, 111, Color(0.56, 0.26, 0.20), Color(1.00, 1.00, 0.11)) # brown to yellow, 2 (gold)
+			lerp_palette_range(112, 119, Color(0.04, 0.03, 0.00), Color(0.44, 0.29, 0.20)) # tan/flesh 1
+			lerp_palette_range(120, 127, Color(0.50, 0.33, 0.25), Color(0.89, 0.70, 0.60)) # tan/flesh 2
+			lerp_palette_range(128, 143, Color(0.67, 0.54, 0.64), Color(0.06, 0.03, 0.03))
+			lerp_palette_range(144, 159, Color(0.73, 0.45, 0.62), Color(0.06, 0.03, 0.03))
+			lerp_palette_range(160, 167, Color(0.86, 0.76, 0.73), Color(0.48, 0.39, 0.33)) # tan 1
+			lerp_palette_range(168, 175, Color(0.42, 0.34, 0.29), Color(0.06, 0.04, 0.03)) # tan 2
+			lerp_palette_range(176, 191, Color(0.44, 0.51, 0.48), Color(0.03, 0.04, 0.03))
+			lerp_palette_range(192, 207, Color(1.00, 0.95, 0.11), Color(0.04, 0.03, 0.00))
+			lerp_palette_range(208, 223, Color(0.00, 0.00, 1.00), Color(0.04, 0.04, 0.06)) # blue
+			lerp_palette_range(224, 231, Color(0.17, 0.00, 0.00), Color(0.64, 0.15, 0.04)) # dark red to light orange/tan 1 (lava)
+			lerp_palette_range(232, 239, Color(0.72, 0.20, 0.06), Color(0.97, 0.83, 0.55)) # dark red to light orange/tan 2
+			lerp_palette_range(240, 243, Color(167.0/255, 123.0/255, 59.0/255), Color(231.0/255, 227.0/255, 87.0/255))
+			lerp_palette_range(244, 249, Color(127.0/255, 191.0/255, 255.0/255), Color(215.0/255, 255.0/255, 255.0/255))
+			lerp_palette_range(247, 251, Color(0.40, 0.00, 0.00), Color(1.0, 0.0, 0.0)) # bright red
+			lerp_palette_range(252, 254, Color(255.0/255, 243.0/255, 147.0/255), Color.WHITE)
+			default_palette[255*3+0] = 160
+			default_palette[255*3+1] = 92
+			default_palette[255*3+2] = 84
+		return default_palette
+		
 
 class BSPTextureInfo:
 	var vec_s : Vector3
@@ -266,13 +485,18 @@ func read_vector_convert_scaled() -> Vector3:
 
 
 var error := ERR_UNCONFIGURED
+var save_separate_materials := false # Save material as separate resource.  Set to false when loading in-game.
 var material_path_pattern : String
-var transparent_texture_prefix : String
-var entity_path_pattern : String
-var water_template_path : String
-var slime_template_path : String
-var lava_template_path : String
 var texture_material_rename : Dictionary
+var texture_path_pattern : String
+var texture_emission_path_pattern : String
+var texture_path_remap : Dictionary
+var transparent_texture_prefix : String
+var texture_palette_path : String
+var entity_path_pattern : String
+var water_template : PackedScene
+var slime_template : PackedScene
+var lava_template : PackedScene
 var entity_remap : Dictionary
 var entity_offsets_quake_units : Dictionary
 var array_of_planes_array := []
@@ -290,17 +514,20 @@ var model_scenes : Dictionary = {}
 var is_bsp2 := false
 var _unit_scale : float = 1.0
 var import_lights := true
+var light_brightness_scale := 16.0
 var generate_occlusion_culling := true
 var generate_shadow_mesh := false
 var use_triangle_collision := false
-var use_entity_remap := true
 var culling_textures_exclude : Array[StringName]
 var generate_lightmap_uv2 := true
 var post_import_script_path : String
 var separate_mesh_on_grid := false
 var generate_texture_materials := false
+var overwrite_existing_materials := false
+var overwrite_existing_textures := false
 var mesh_separation_grid_size := 256.0
 var bspx_model_to_brush_map := {}
+var fullbright_range : PackedInt32Array = [224, 255]
 
 
 var inverse_scale_fac : float = 32.0:
@@ -607,7 +834,6 @@ func read_bsp(source_file : String) -> Node:
 	textures.resize(num_textures)
 	for i in num_textures:
 		texture_offset_offsets[i] = file.get_32()
-		#print("offset offset: ", texture_offset_offsets[i])
 	for i in num_textures:
 		var texture_offset := texture_offset_offsets[i]
 		if (texture_offset < 0):
@@ -621,8 +847,7 @@ func read_bsp(source_file : String) -> Node:
 			var complete_offset := textures_offset + texture_offset
 			file.seek(complete_offset)
 			textures[i] = BSPTexture.new()
-			textures[i].read_texture(file, material_path_pattern, texture_material_rename, transparent_texture_prefix, generate_texture_materials)
-		#print("texture: ", textures[i].name, " ", textures[i].width, "x", textures[i].height)
+			textures[i].read_texture(file, self)
 
 	# UV stuff
 	file.seek(texinfo_offset)
@@ -793,7 +1018,6 @@ func read_bsp(source_file : String) -> Node:
 
 			# Create meshes for each cell in the mesh grid.
 			for grid_index in mesh_grid:
-				#print("Grid...")
 				var surface_tools = mesh_grid[grid_index] # Is there a way to loop through the keys instead?
 				var mesh_instance := MeshInstance3D.new()
 				var array_mesh : ArrayMesh = null
@@ -926,9 +1150,9 @@ func read_bsp(source_file : String) -> Node:
 				create_collision_shapes(parent_node, array_of_planes_array, model_mins_maxs_planes, parent_inv_transform)
 
 				# Create liquids (water, slime, lava)
-				create_liquid_from_planes(parent_node, water_planes_array, model_mins_maxs_planes, parent_inv_transform, water_template_path)
-				create_liquid_from_planes(parent_node, slime_planes_array, model_mins_maxs_planes, parent_inv_transform, slime_template_path)
-				create_liquid_from_planes(parent_node, lava_planes_array, model_mins_maxs_planes, parent_inv_transform, lava_template_path)
+				create_liquid_from_planes(parent_node, water_planes_array, model_mins_maxs_planes, parent_inv_transform, water_template)
+				create_liquid_from_planes(parent_node, slime_planes_array, model_mins_maxs_planes, parent_inv_transform, slime_template)
+				create_liquid_from_planes(parent_node, lava_planes_array, model_mins_maxs_planes, parent_inv_transform, lava_template)
 	if (post_import_script_path):
 		var post_import_node := Node.new()
 		print("Loading post import script: ", post_import_script_path)
@@ -956,9 +1180,9 @@ func read_bsp(source_file : String) -> Node:
 
 # Traverse tree and create liquid.
 # Note: Not used if we have the brush data.
-func create_liquid_from_planes(parent_node : Node3D, planes_array : Array, model_mins_maxs_planes : Array[Plane], parent_inv_transform : Transform3D, template_path : String):
-	if (planes_array.size() > 0 && template_path):
-		var liquid_body : Node = load(template_path).instantiate()
+func create_liquid_from_planes(parent_node : Node3D, planes_array : Array, model_mins_maxs_planes : Array[Plane], parent_inv_transform : Transform3D, template : PackedScene):
+	if (planes_array.size() > 0 && template):
+		var liquid_body : Node = template.instantiate()
 		parent_node.add_child(liquid_body, true)
 		liquid_body.transform = parent_inv_transform
 		liquid_body.owner = root_node
@@ -999,11 +1223,10 @@ func parse_entity_string(entity_string : String) -> Array:
 		elif (char == '{'):
 			ent_dict = {}
 			parsed_key = false
-	#print("ent dict: ", ent_dict_array)
 	return ent_dict_array
 
-const WORLDSPAWN_STRING_NAME := StringName("worldspawn")
-const LIGHT_STRING_NAME := StringName("light")
+const WORLDSPAWN_STRING_NAME := &"worldspawn"
+const LIGHT_STRING_NAME := &"light"
 var post_import_nodes : Array[Node] = []
 
 
@@ -1012,14 +1235,13 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 	for ent_dict in ent_dict_array:
 		if (ent_dict.has("classname")):
 			var classname : StringName = ent_dict["classname"].to_lower()
-			#print("Classname: ", classname)
 			var scene_path : String = ""
-			if use_entity_remap:
-				classname = classname.to_lower()
-				if (entity_remap.has(classname)): scene_path = entity_remap[classname]
+			if (entity_remap.has(classname)):
+				scene_path = entity_remap[classname]
 			else:
-				if (classname != WORLDSPAWN_STRING_NAME): scene_path = entity_path_pattern.replace("{classname}", classname)
-			if scene_path != "":
+				if (classname != WORLDSPAWN_STRING_NAME):
+					scene_path = entity_path_pattern.replace("{classname}", classname)
+			if (!scene_path.is_empty() && ResourceLoader.exists(scene_path)):
 				var scene_resource = load(scene_path)
 				if (!scene_resource):
 					print("Failed to load ", scene_path)
@@ -1078,14 +1300,16 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 										printerr("Key value type not handled for ", key, " : ", dest_type)
 										value = string_value # Try setting it to the string value and hope for the best.
 							scene_node.set(key, value)
-			else: # No entity remap for this classname
+			else: # No entity remap for this classname or no scene matching the entity path pattern
 				if (classname == LIGHT_STRING_NAME):
 					if (import_lights):
 						add_light_entity(ent_dict)
 				else:
 					if (classname != WORLDSPAWN_STRING_NAME):
-						printerr("No entity remap found for ", classname, ".  Ignoring.")
-	#print("model_scenes: ", model_scenes)
+						if (!scene_path.is_empty()):
+							printerr("Could not open ", scene_path, " for classname: ", classname)
+						else:
+							printerr("No entity remap found for ", classname, ".  Ignoring.")
 
 
 func add_generic_entity(scene_node : Node, ent_dict : Dictionary):
@@ -1132,7 +1356,7 @@ func add_light_entity(ent_dict : Dictionary):
 	if (ent_dict.has(COLOR_STRING_NAME)):
 		light_color = string_to_color(ent_dict[COLOR_STRING_NAME])
 	light_node.omni_range = light_value * _unit_scale
-	light_node.light_energy = light_value / 255.0
+	light_node.light_energy = light_value * light_brightness_scale / 255.0
 	light_node.light_color = light_color
 	light_node.shadow_enabled = true # Might want to have an option to shut this off for some lights?
 	add_generic_entity(light_node, ent_dict)
@@ -1233,20 +1457,20 @@ func create_collision_from_brushes(parent : Node3D, brushes : Array[BSPXBrush], 
 				body_to_add_to = static_body_child
 		elif (brush.contents == CONTENTS_WATER):
 			if (!water_body):
-				water_body = load(water_template_path).instantiate()
+				water_body = water_template.instantiate()
 				parent.add_child(water_body)
 				water_body.owner = root_node
 			body_to_add_to = water_body
 			print("water body ", water_body)
 		elif (brush.contents == CONTENTS_SLIME):
 			if (!slime_body):
-				slime_body = load(slime_template_path).instantiate()
+				slime_body = slime_template.instantiate()
 				parent.add_child(slime_body)
 				slime_body.owner = root_node
 			body_to_add_to = slime_body
 		elif (brush.contents == CONTENTS_LAVA):
 			if (!lava_body):
-				lava_body = load(lava_template_path).instantiate()
+				lava_body = lava_template.instantiate()
 				parent.add_child(lava_body)
 				lava_body.owner = root_node
 			body_to_add_to = lava_body
