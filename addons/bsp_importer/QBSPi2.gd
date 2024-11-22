@@ -1,7 +1,7 @@
 @tool class_name BSPi2 extends Node3D
 
 
-## QBSPi2 (Quake BSPi Importer 2) By CSLR.
+## QBSPi2 (Quake BSP Importer 2) By CSLR.
 ## As of November 21 2024 Converts Quake 2 Geometry To Edges.
 
 
