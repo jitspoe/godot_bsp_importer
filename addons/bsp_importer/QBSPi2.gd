@@ -100,6 +100,8 @@ func convertBSPtoScene(file_path : String) -> Node:
 	
 	MeshInstance.owner = CenterNode
 	CollisionShape.owner = CenterNode
+
+	CollisionShape.shape = MeshInstance.mesh.create_trimesh_shape()
 	
 	return CenterNode
 
