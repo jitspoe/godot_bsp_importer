@@ -348,6 +348,9 @@ func get_face_edges(face_bytes : PackedByteArray):
 	return face_edges
 
 ## creates and returns an ImmediateMesh, as of right now uses the edges but should use tris.
+
+## this has some issues with materials being duplicated as each texture has its own surface and sometimes with complicated maps it overruns the max surface count, someone pls fix 
+
 func create_mesh(data : Array) -> Mesh:
 	var mesh = ImmediateMesh.new()
 	var texture_list = textures["lumps"]
