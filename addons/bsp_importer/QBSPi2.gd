@@ -351,39 +351,35 @@ func get_face_edges(face_bytes : PackedByteArray):
 
 ## this has some issues with materials being duplicated as each texture has its own surface and sometimes with complicated maps it overruns the max surface count, someone pls fix 
 
-func create_mesh(data : Array) -> Mesh:
-	var mesh = ImmediateMesh.new()
+func create_mesh(face_data : Array) -> Mesh:
+	var mesh = ArrayMesh.new()
 	var texture_list = textures["lumps"]
 	var surface_list = {}
+	var material_list = {}
 	
-	if not textures_path.ends_with("/"): textures_path += "/"
+	var mesh_arrays = []
+	mesh_arrays.resize(Mesh.ARRAY_MAX)
 	
 	for texture in texture_list:
 		texture = texture as BSPTexture
-		if not surface_list.keys().has(texture):
-			surface_list[texture] = []
+		
+		if not surface_list.has(texture.texture_path):
+			var st =  SurfaceTool.new()
+			surface_list[texture.texture_path] = st
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	
-	for face in data:
+	for face in face_data:
 		face = face as BSPFace
-		var surface_entry = texture_list[face.texture_index]
-		surface_list[surface_entry].append(face)
-	
-	
-	var sfc = 0 # surface count
-	
-	
-	for surfaceTexture in surface_list:
-		var surface = surface_list[surfaceTexture]
-		if surface.size() > 0:
-			var texture = surfaceTexture as BSPTexture
-			mesh.surface_begin(MeshPrim)
+		var texture =  textures["lumps"][face.texture_index]
+		
+		if surface_list.has(texture.texture_path):
 			var material = StandardMaterial3D.new()
 			
 			if not FileAccess.file_exists(textures_path + texture.texture_path + ".jpg"):
 				prints("QBSPi2 Cannot Find File '%s'. Ensure The File Exists." % (textures_path + texture.texture_path + ".jpg"))
 			
-			var matTexture = load("res://icon.svg")
 			
+			var matTexture = load("res://icon.svg")
 			
 			if FileAccess.file_exists(textures_path + texture.texture_path + ".jpg"):
 				matTexture = load(textures_path + texture.texture_path + ".jpg")
@@ -393,49 +389,68 @@ func create_mesh(data : Array) -> Mesh:
 			
 			material.albedo_texture = matTexture
 			
-			for face in surface:
-				face = face as BSPFace
-				var verts = face.verts as PackedVector3Array
-				for vertIndex in range(0, verts.size(), 3):
-					var v0 = verts[vertIndex + 0]
-					var v1 = verts[vertIndex + 1]
-					var v2 = verts[vertIndex + 2]
-					
-					var uv0 = get_uv(v0, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
-					var uv1 = get_uv(v1, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
-					var uv2 = get_uv(v2, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
-					
-					var normal = (v1 - v0).cross((v2 - v0))
-					
-					mesh.surface_set_normal(normal.normalized())
-					
-					mesh.surface_set_uv(uv0)
-					mesh.surface_add_vertex(v0 / 32.0)
-					
-					mesh.surface_set_uv(uv1)
-					mesh.surface_add_vertex(v1 / 32.0)
-					
-					mesh.surface_set_uv(uv2)
-					mesh.surface_add_vertex(v2 / 32.0)
-					
+			var surface_tool = surface_list.get(texture.texture_path) as SurfaceTool
 			
+			material_list[surface_tool] = material
 			
+			var verts = face.verts
 			
-			mesh.surface_end()
-			mesh.surface_set_material(sfc, material)
-			sfc += 1
+			for vertIndex in range(0, verts.size(), 3):
 			
-			
-			
-		
+				var v0 = verts[vertIndex + 0]
+				var v1 = verts[vertIndex + 1]
+				var v2 = verts[vertIndex + 2]
+				
+				var uv0 = get_uv(v0, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
+				var uv1 = get_uv(v1, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
+				var uv2 = get_uv(v2, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
+				
+				var normal : Vector3 = (v1 - v0).cross((v2 - v0))
+				
+				surface_tool.set_material(material)
+				
+				surface_tool.set_normal(normal.normalized())
+				surface_tool.set_uv(uv0)
+				surface_tool.add_vertex(v0 / 32.0)
+				
+				surface_tool.set_normal(normal.normalized())
+				
+				surface_tool.set_uv(uv1)
+				surface_tool.add_vertex(v1 / 32.0)
+				
+				surface_tool.set_normal(normal.normalized())
+				surface_tool.set_uv(uv2)
+				surface_tool.add_vertex(v2 / 32.0)
 	
-	prints("\n\n\n QBSPi2 - Completed ImmediateMesh With %s Surfaces" % mesh.get_surface_count())
+	
+	for tool in surface_list.values():
+		tool = tool as SurfaceTool
+		mesh = tool.commit(mesh) as ArrayMesh
+	
+	for material in material_list.size():
+		mesh.surface_set_material(material, material_list.values()[material])
+	
+	prints("\n\n\n QBSPi2 - Completed Mesh With %s Surfaces" % mesh.get_surface_count())
 	
 	return mesh
 
+
+#
+#mesh.surface_set_normal(normal.normalized())
+#
+#mesh.surface_set_uv(uv0)
+#mesh.surface_add_vertex(v0 / 32.0)
+#
+#mesh.surface_set_uv(uv1)
+#mesh.surface_add_vertex(v1 / 32.0)
+#
+#mesh.surface_set_uv(uv2)
+#mesh.surface_add_vertex(v2 / 32.0)
+#
+
+
+
 func get_uv(vertex : Vector3, u_axis : Vector3, v_axis : Vector3, u_offset : float, v_offset : float, tex_size : Vector2) -> Vector2:
-	u_offset = 0
-	v_offset = 0
 	var x = vertex.x / tex_size.x
 	var y = vertex.z / tex_size.y
 	var z = vertex.y / tex_size.y
