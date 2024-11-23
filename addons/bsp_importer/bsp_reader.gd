@@ -568,15 +568,15 @@ func read_bsp(source_file : String) -> Node:
 	print("Attempting to import %s" % source_file)
 	print("Material path pattern: ", material_path_pattern)
 	file = FileAccess.open(source_file, FileAccess.READ)
-
+	
 	if (!file):
 		error = FileAccess.get_open_error()
 		print("Failed to open %s: %d" % [source_file, error])
 		return null
-
+	
 	root_node = Node3D.new()
 	root_node.name = source_file.get_file().get_basename() # Get the file out of the path and remove file extension
-
+	
 	# Read the header
 	var is_q2 := false
 	is_bsp2 = false
@@ -587,17 +587,22 @@ func read_bsp(source_file : String) -> Node:
 	var index_bits_32 := false
 	print("BSP version: %d\n" % bsp_version)
 	if (bsp_version == 1347633737): # "IBSP" - Quake 2 BSP format
-		print("IBSP (Quake2?) format - not supported, yet.")
+		print("IBSP (Quake 2?) Format - Moving File to BSPi2. If It Doesn't Work, File An Issue On Github Explicitly Yelling at CSLR. Honestly, She Deserves it.")
+		
+		# Keeping these for safety!
+		
 		is_q2 = true
 		has_textures = false
 		has_clipnodes = false
 		has_brush_table = true
 		bsp_version = file.get_32()
-		print("BSP sub-version: %d\n" % bsp_version)
 		
+		
+		
+		print("BSP sub-version: %d\n" % bsp_version)
 		file.close()
 		file = null
-		return
+		return BSPi2.new().convertBSPtoScene(source_file)
 	if (bsp_version == 1112756274): # "2PSB" - depricated extended quake BSP format.
 		print("2PSB format not supported.")
 		file.close()

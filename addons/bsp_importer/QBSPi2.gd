@@ -1,4 +1,4 @@
-@tool class_name BSPi2 extends Node3D
+@tool class_name BSPi2 extends Node
 
 
 ## QBSPi2 (Quake BSPi Importer 2) By CSLR.
@@ -31,24 +31,14 @@ enum {
 	LUMP_BRUSHSIDE
 }
 
-@export var bsp_file : String
-@export var textures_path : String = "res://Assets/textures/"
-@export var texture_extension : String = ".jpg"
-
-@export var convertBSP : bool = false : set = set_convertBSP; 
+@export var textures_path : String = "res://materials/quake2_textures/"
 
 @export var MeshPrim = Mesh.PRIMITIVE_TRIANGLES : set = setmp; func setmp(m): MeshPrim = m
-
-@export var meshinstance : MeshInstance3D : set = setmi; func setmi(m): meshinstance = m
 
 
 var geometry := {}
 var textures := {}
 
-func set_convertBSP(c): 
-	convertBSP = c
-	if c: convert_to_mesh()
-	convertBSP = false
 
 ## returns the raw bsp bytes.
 func read_bsp(file) -> PackedByteArray: return FileAccess.get_file_as_bytes(file)
@@ -86,16 +76,41 @@ class BSPTexture extends Node:
 	
 	
 
-## Central Function
-func convert_to_mesh():
-	var bsp_bytes : PackedByteArray = read_bsp(bsp_file).duplicate()
+func check_for_dir(dir):
+	if not DirAccess.dir_exists_absolute(dir): DirAccess.make_dir_absolute(dir)
+
+func convertBSPtoScene(file_path : String) -> Node:
+	check_for_dir("res://materials")
+	check_for_dir("res://materials/quake2_textures/")
 	
-	await get_tree().create_timer(0.1).timeout
+	prints("Converting File", file_path, ". Please Keep in Mind This is Still in Development and has some issues.")
+	
+	var file_name = file_path.get_base_dir()
+	print(file_name)
+	
+	var CenterNode = StaticBody3D.new()
+	var MeshInstance = convert_to_mesh(file_path) 
+	var CollisionShape = CollisionShape3D.new()
+	
+	var cnn = str("BSPi2_", file_path.get_basename().trim_prefix(file_path.get_base_dir())).replace("/", "")
+	CenterNode.name = cnn
+	
+	CenterNode.add_child(MeshInstance)
+	CenterNode.add_child(CollisionShape)
+	
+	MeshInstance.owner = CenterNode
+	CollisionShape.owner = CenterNode
+	
+	return CenterNode
+
+## Central Function
+func convert_to_mesh(file):
+	var bsp_bytes : PackedByteArray = read_bsp(file).duplicate()
 	
 	var bsp_version = str(convert_from_uint32(bytes(bsp_bytes, range(4, 8))))
 	var magic_num = bytes(bsp_bytes, range(0, 4)).get_string_from_utf8()
 	
-	prints("QBSPi2 Found BSP Version %s %s, Expecting Version IBSP 38, Version 46 May Not Be Supported Yet." % [magic_num, bsp_version])
+	prints("QBSPi2 Found BSP Version %s %s, Expecting Version IBSP 38" % [magic_num, bsp_version])
 	
 	var directory = fetch_directory(bsp_bytes)
 	
@@ -120,8 +135,17 @@ func convert_to_mesh():
 	
 	process_to_mesh_array(geometry)
 	
-	if meshinstance: meshinstance.mesh = create_mesh(geometry["face"])
+	var mesh = create_mesh(geometry["face"])
+	var mi = MeshInstance3D.new()
+	var arm = ArrayMesh.new()
 	
+	for surface in mesh.get_surface_count():
+		arm.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, mesh.surface_get_arrays(surface))
+		arm.surface_set_material(surface, mesh.surface_get_material(surface))
+	
+	mi.mesh = arm
+	
+	return mi
 
 
 ## takes the vertex, face, edge and face edge arrays and outputs an array of all the edge points.
@@ -349,47 +373,54 @@ func create_mesh(data : Array) -> Mesh:
 			var texture = surfaceTexture as BSPTexture
 			mesh.surface_begin(MeshPrim)
 			var material = StandardMaterial3D.new()
-			if FileAccess.file_exists(textures_path + texture.texture_path + texture_extension):
-				var matTexture = load(textures_path + texture.texture_path + texture_extension)
-				material.albedo_texture = matTexture
-				
-				
-				for face in surface:
-					face = face as BSPFace
-					var verts = face.verts as PackedVector3Array
-					for vertIndex in range(0, verts.size(), 3):
-						var v0 = verts[vertIndex + 0]
-						var v1 = verts[vertIndex + 1]
-						var v2 = verts[vertIndex + 2]
-						
-						var uv0 = get_uv(v0, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
-						var uv1 = get_uv(v1, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
-						var uv2 = get_uv(v2, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
-						
-						var normal = (v1 - v0).cross((v2 - v0))
-						
-						mesh.surface_set_normal(normal.normalized())
-						
-						mesh.surface_set_uv(uv0)
-						mesh.surface_add_vertex(v0)
-						
-						mesh.surface_set_uv(uv1)
-						mesh.surface_add_vertex(v1)
-						
-						mesh.surface_set_uv(uv2)
-						mesh.surface_add_vertex(v2)
-						
-				
-				
-				
-				mesh.surface_end()
-				mesh.surface_set_material(sfc, material)
-				sfc += 1
-				
+			
+			if not FileAccess.file_exists(textures_path + texture.texture_path + ".jpg"):
+				prints("QBSPi2 Cannot Find File '%s'. Ensure The File Exists." % (textures_path + texture.texture_path + ".jpg"))
+			
+			var matTexture = load("res://icon.svg")
+			
+			if FileAccess.file_exists(textures_path + texture.texture_path + ".jpg"):
+				matTexture = load(textures_path + texture.texture_path + ".jpg")
+			
+			material.albedo_texture = matTexture
+			
+			for face in surface:
+				face = face as BSPFace
+				var verts = face.verts as PackedVector3Array
+				for vertIndex in range(0, verts.size(), 3):
+					var v0 = verts[vertIndex + 0]
+					var v1 = verts[vertIndex + 1]
+					var v2 = verts[vertIndex + 2]
+					
+					var uv0 = get_uv(v0, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
+					var uv1 = get_uv(v1, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
+					var uv2 = get_uv(v2, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
+					
+					var normal = (v1 - v0).cross((v2 - v0))
+					
+					mesh.surface_set_normal(normal.normalized())
+					
+					mesh.surface_set_uv(uv0)
+					mesh.surface_add_vertex(v0 / 32.0)
+					
+					mesh.surface_set_uv(uv1)
+					mesh.surface_add_vertex(v1 / 32.0)
+					
+					mesh.surface_set_uv(uv2)
+					mesh.surface_add_vertex(v2 / 32.0)
+					
+			
+			
+			
+			mesh.surface_end()
+			mesh.surface_set_material(sfc, material)
+			sfc += 1
+			
+			
+			
 		
 	
-	
-	
+	prints("\n\n\n QBSPi2 - Completed ImmediateMesh With %s Surfaces" % mesh.get_surface_count())
 	
 	return mesh
 
