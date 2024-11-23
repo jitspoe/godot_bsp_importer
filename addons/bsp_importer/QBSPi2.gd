@@ -357,6 +357,8 @@ func create_mesh(face_data : Array) -> Mesh:
 	var surface_list = {}
 	var material_list = {}
 	
+	var missing_textures = []
+	
 	var mesh_arrays = []
 	mesh_arrays.resize(Mesh.ARRAY_MAX)
 	
@@ -374,9 +376,11 @@ func create_mesh(face_data : Array) -> Mesh:
 		
 		if surface_list.has(texture.texture_path):
 			var material = StandardMaterial3D.new()
-			
-			if not FileAccess.file_exists(textures_path + texture.texture_path + ".jpg"):
-				prints("QBSPi2 Cannot Find File '%s'. Ensure The File Exists." % (textures_path + texture.texture_path + ".jpg"))
+			var p = textures_path + texture.texture_path + ".jpg"
+			if not FileAccess.file_exists(p):
+				if not missing_textures.has(p):
+					missing_textures.append(p)
+				#prints("QBSPi2 Cannot Find File '%s'. Ensure The File Exists." % (textures_path + texture.texture_path + ".jpg"))
 			
 			
 			var matTexture = load("res://icon.svg")
@@ -394,44 +398,39 @@ func create_mesh(face_data : Array) -> Mesh:
 			material_list[surface_tool] = material
 			
 			var verts = face.verts
-			
-			for vertIndex in range(0, verts.size(), 3):
-			
-				var v0 = verts[vertIndex + 0]
-				var v1 = verts[vertIndex + 1]
-				var v2 = verts[vertIndex + 2]
+			if not material.albedo_color.a == 0:
+				for vertIndex in range(0, verts.size(), 3):
 				
-				var uv0 = get_uv(v0, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
-				var uv1 = get_uv(v1, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
-				var uv2 = get_uv(v2, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
-				
-				var normal : Vector3 = (v1 - v0).cross((v2 - v0))
-				
-				surface_tool.set_material(material)
-				
-				surface_tool.set_normal(normal.normalized())
-				surface_tool.set_uv(uv0)
-				surface_tool.add_vertex(v0 / 32.0)
-				
-				surface_tool.set_normal(normal.normalized())
-				
-				surface_tool.set_uv(uv1)
-				surface_tool.add_vertex(v1 / 32.0)
-				
-				surface_tool.set_normal(normal.normalized())
-				surface_tool.set_uv(uv2)
-				surface_tool.add_vertex(v2 / 32.0)
+					var v0 = verts[vertIndex + 0]
+					var v1 = verts[vertIndex + 1]
+					var v2 = verts[vertIndex + 2]
+					
+					var uv0 = get_uv(v0, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
+					var uv1 = get_uv(v1, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
+					var uv2 = get_uv(v2, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
+					
+					var normal : Vector3 = (v1 - v0).cross((v2 - v0))
+					
+					surface_tool.set_material(material)
+					
+					surface_tool.set_normal(normal.normalized())
+					surface_tool.set_uv(uv0)
+					surface_tool.add_vertex(v0 / 32.0)
+					
+					surface_tool.set_normal(normal.normalized())
+					
+					surface_tool.set_uv(uv1)
+					surface_tool.add_vertex(v1 / 32.0)
+					
+					surface_tool.set_normal(normal.normalized())
+					surface_tool.set_uv(uv2)
+					surface_tool.add_vertex(v2 / 32.0)
 	
 	
 	for tool in surface_list.values():
 		tool = tool as SurfaceTool
 		mesh = tool.commit(mesh) as ArrayMesh
-	
-	for material in material_list.size():
-		mesh.surface_set_material(material, material_list.values()[material])
-	
-	prints("\n\n\n QBSPi2 - Completed Mesh With %s Surfaces" % mesh.get_surface_count())
-	
+	prints("\n\n\n QBSPi2 - Completed Mesh With %s Surfaces" % mesh.get_surface_count(), ".\nMissing Textures:", missing_textures)
 	return mesh
 
 
