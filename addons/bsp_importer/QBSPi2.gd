@@ -379,8 +379,12 @@ func create_mesh(data : Array) -> Mesh:
 			
 			var matTexture = load("res://icon.svg")
 			
+			
 			if FileAccess.file_exists(textures_path + texture.texture_path + ".jpg"):
 				matTexture = load(textures_path + texture.texture_path + ".jpg")
+			else:
+				material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				material.albedo_color.a = 0
 			
 			material.albedo_texture = matTexture
 			
