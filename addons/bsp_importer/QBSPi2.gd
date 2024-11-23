@@ -92,7 +92,6 @@ func convert_to_mesh():
 	geometry["edge"] = get_edges(bytes(bsp_bytes, edge_lmp))
 	geometry["face_edge"] = get_face_edges(bytes(bsp_bytes, face_edge_lmp))
 	
-	print(geometry)
 	
 	var geometry = process_to_mesh_array(geometry)
 	
