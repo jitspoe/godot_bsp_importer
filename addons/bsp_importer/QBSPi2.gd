@@ -352,7 +352,6 @@ func create_mesh(data : Array) -> Mesh:
 			if FileAccess.file_exists(textures_path + texture.texture_path + texture_extension):
 				var matTexture = load(textures_path + texture.texture_path + texture_extension)
 				material.albedo_texture = matTexture
-				prints("starting surface", sfc)
 				
 				
 				for face in surface:
@@ -387,7 +386,6 @@ func create_mesh(data : Array) -> Mesh:
 				mesh.surface_set_material(sfc, material)
 				sfc += 1
 				
-				print("finished surface")
 		
 	
 	
