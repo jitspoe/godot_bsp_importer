@@ -35,7 +35,7 @@ enum {
 
 @export var convertBSP : bool = false : set = set_convertBSP; 
 
-@export var MeshPrim = Mesh.PRIMITIVE_LINES : set = setmp; func setmp(m): MeshPrim = m
+@export var MeshPrim = Mesh.PRIMITIVE_TRIANGLES : set = setmp; func setmp(m): MeshPrim = m
 
 @export var meshinstance : MeshInstance3D : set = setmi; func setmi(m): meshinstance = m
 
@@ -108,6 +108,7 @@ func process_to_mesh_array(geometry : Dictionary) -> PackedVector3Array:
 	var verts = geometry.get("vertex")
 	var edges = geometry.get("edge")
 	var face_edges = geometry.get("face_edge")
+	
 	for face_index in geometry.get("face"):
 		var face = face_index as BSPFace
 		var first_edge = face.first_edge
@@ -115,7 +116,13 @@ func process_to_mesh_array(geometry : Dictionary) -> PackedVector3Array:
 		
 		var edge_range = range(first_edge, first_edge + num_edges)
 		
+		var face_vert_list = []
+		
+		
 		for edge in edge_range:
+			
+			
+			
 			var face_edge = face_edges[edge]
 			
 			edge = edges[abs(face_edge)]
@@ -136,12 +143,32 @@ func process_to_mesh_array(geometry : Dictionary) -> PackedVector3Array:
 			var vert0 = verts[edge0]
 			var vert1 = verts[edge1]
 			
-			output_verts.append_array([vert0, vert1])
+			if MeshPrim == Mesh.PRIMITIVE_LINES:
+				output_verts.append_array([vert0, vert1])
+			else:
+				face_vert_list.append_array([vert0, vert1])
+			
+		if MeshPrim == Mesh.PRIMITIVE_TRIANGLES:
+			
+			for v in range(0, face_vert_list.size()-2):
+				
+				var vert0 = face_vert_list[0]
+				var vert1 = face_vert_list[v + 1]
+				var vert2 = face_vert_list[v + 2]
+				
+				
+				output_verts.append_array([vert2, vert1, vert0])
+				
+				
+				
 			
 			
+			
+		
+		#print(face_edge_list)
 		
 		
-		
+	
 	
 	
 	return output_verts
@@ -189,7 +216,7 @@ func get_face_lump(lump_bytes : PackedByteArray):
 	prints("QBSPi2 Calculated Estimate of %s Faces" % count)
 	var faces : Array[BSPFace] = []
 	var f = 0
-
+	
 	while f < count:
 		var new_face := BSPFace.new()
 		var base_index = f * 20
@@ -202,7 +229,6 @@ func get_face_lump(lump_bytes : PackedByteArray):
 		new_face.num_edges  = by.decode_u16(8)
 		
 		
-		prints(new_face.plane, new_face.plane_side, new_face.first_edge, new_face.num_edges)
 		
 		faces.append(new_face)
 		f += 1
@@ -244,7 +270,21 @@ func get_face_edges(face_bytes : PackedByteArray):
 func create_mesh(verts : PackedVector3Array) -> Mesh:
 	var mesh = ImmediateMesh.new()
 	mesh.surface_begin(MeshPrim)
-	for vert in verts: mesh.surface_add_vertex(vert)
+	for vert in range(0, verts.size(), 3):
+		var a = verts[vert + 0]
+		var b = verts[vert + 1]
+		var c = verts[vert + 2]
+		 
+		var normal = (b - a).cross((c - a))
+		
+		mesh.surface_set_color(Color(randf(), randf(), randf()))
+		
+		mesh.surface_set_normal(normal)
+		
+		mesh.surface_add_vertex(a)
+		mesh.surface_add_vertex(b)
+		mesh.surface_add_vertex(c)
+		
 	mesh.surface_end()
 
 	return mesh
