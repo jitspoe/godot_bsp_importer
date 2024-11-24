@@ -39,6 +39,8 @@ enum {
 var geometry := {}
 var textures := {}
 
+var entities := []
+
 
 ## returns the raw bsp bytes.
 func read_bsp(file) -> PackedByteArray: return FileAccess.get_file_as_bytes(file)
@@ -53,7 +55,7 @@ class BSPFace:
 	
 	var texture_index : int = 0 # uint16
 	
-	var lightmap_styles : Array = [null, null, null, null] # uint8 array
+	var lightmap_styles : Array = [null, null, null, null] # uint8 array(?)
 	var lightmap_offset : int = 0 # uint32
 	
 	var verts : PackedVector3Array = [] # For Mesh Construction
@@ -73,11 +75,17 @@ class BSPTexture extends Node:
 	var texture_path : String # uint32
 	
 	var next_textinfo : int # uint32
+
+class BSPEntity extends Node3D:
+	var default_class_data : Dictionary = {}
 	
-	
+	func updatename() -> void:
+		if default_class_data.has("classname"):
+			self.name = default_class_data.get("classname")
 
 func check_for_dir(dir):
 	if not DirAccess.dir_exists_absolute(dir): DirAccess.make_dir_absolute(dir)
+
 
 func convertBSPtoScene(file_path : String) -> Node:
 	check_for_dir("res://materials")
@@ -100,7 +108,7 @@ func convertBSPtoScene(file_path : String) -> Node:
 	
 	MeshInstance.owner = CenterNode
 	CollisionShape.owner = CenterNode
-
+	
 	CollisionShape.shape = MeshInstance.mesh.create_trimesh_shape()
 	
 	return CenterNode
@@ -123,6 +131,12 @@ func convert_to_mesh(file):
 	var edge_lmp = range(directory[LUMP_EDGE].get(LUMP_OFFSET), directory[LUMP_EDGE].get(LUMP_OFFSET)+directory[LUMP_EDGE].get(LUMP_LENGTH))
 	
 	var texture_lmp = range(directory[LUMP_TEXTURE].get(LUMP_OFFSET), directory[LUMP_TEXTURE].get(LUMP_OFFSET)+directory[LUMP_TEXTURE].get(LUMP_LENGTH))
+	
+	var entity_lmp = range(directory[LUMP_ENT].get(LUMP_OFFSET), directory[LUMP_ENT].get(LUMP_OFFSET)+directory[LUMP_ENT].get(LUMP_LENGTH))
+	
+	entities = process_entity_lmp(bytes(bsp_bytes, entity_lmp))
+	
+	print(entities)
 	
 	geometry = {}
 	textures = {}
@@ -207,6 +221,30 @@ func process_to_mesh_array(geometry : Dictionary) -> void:
 			face_vert_out.append(vert0)
 		
 		face.verts = face_vert_out
+
+func process_entity_lmp(ent_bytes : PackedByteArray):
+	prints("a unicode passing error may accur, this is 'normal'.")
+	var entities : Dictionary = process_json(ent_bytes.get_string_from_utf8())
+	var entity_list = entities.get("data")
+	
+	var entity_output = []
+	
+	for entity in entity_list:
+		if entity is Dictionary:
+			var entityNode = BSPEntity.new()
+			if entity.has("classname") and ClassDB.class_exists(entity.get("classname")):
+				entityNode = ClassDB.instantiate(entity.get("classname"))
+			else:
+				entityNode.default_class_data = entity
+			entityNode.updatename()
+			entity_output.append(entityNode)
+	
+	return entity_output
+
+func process_json(string):
+	var replaced_string = string.replace('" "', '":"').replace('"\n', '",\n').replace("}", "},")
+	replaced_string = str('{"data":[', replaced_string, "]}")
+	return JSON.parse_string(replaced_string)
 
 
 ## grabs the directory
