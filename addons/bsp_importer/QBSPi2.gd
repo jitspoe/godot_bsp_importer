@@ -593,15 +593,15 @@ func create_mesh(face_data : Array) -> Mesh:
 					surface_tool.set_material(material)
 					
 					surface_tool.set_normal(normal.normalized())
-					surface_tool.set_uv(uv0)
-					surface_tool.add_vertex(v0)
+					surface_tool.set_uv(uv2)
+					surface_tool.add_vertex(v2)
 					
 					
 					surface_tool.set_uv(uv1)
 					surface_tool.add_vertex(v1)
 					
-					surface_tool.set_uv(uv2)
-					surface_tool.add_vertex(v2)
+					surface_tool.set_uv(uv0)
+					surface_tool.add_vertex(v0)
 	
 	
 	for tool in surface_list.values():
