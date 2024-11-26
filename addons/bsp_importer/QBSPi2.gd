@@ -613,9 +613,10 @@ func create_mesh(face_data : Array) -> Mesh:
 
 
 func get_uv(vertex : Vector3, u_axis : Vector3, v_axis : Vector3, u_offset : float, v_offset : float, tex_size : Vector2) -> Vector2:
-	var x = vertex.x / tex_size.x
-	var y = vertex.z / tex_size.y
+	var x = -(vertex.z / tex_size.y)
+	var y = -(vertex.x / tex_size.x)
 	var z = vertex.y / tex_size.y
+	
 	
 	var u = x * u_axis.x + y * u_axis.y + z * u_axis.z + u_offset
 	var v = x * v_axis.x + y * v_axis.y + z * v_axis.z + v_offset
