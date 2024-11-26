@@ -587,7 +587,16 @@ func read_bsp(source_file : String) -> Node:
 	var index_bits_32 := false
 	print("BSP version: %d\n" % bsp_version)
 	if (bsp_version == 1347633737): # "IBSP" - Quake 2 BSP format
-		print("IBSP (Quake 2?) Format - Moving File to BSPi2. If It Doesn't Work, File An Issue On Github Explicitly Yelling at CSLR. Honestly, She Deserves it.")
+		
+		var bsp_q2_texts = [
+			"Moving File %s to QBSPi2" % source_file.get_file().get_basename(),
+			"QBSPi2 is Our Lord and Savior!, said literally no one ever.",
+			"Why did jitspoe decide QBSPi2 should be in here??",
+			"Why did I decide QBSPi2 would be a fun project?? like?? why???",
+			
+		]
+		
+		prints("Quake 2 BSP Format Detected.", bsp_q2_texts.pick_random())
 		
 		# Keeping these for safety!
 		
@@ -1626,7 +1635,6 @@ func handle_clip_child(file : FileAccess, clipnodes_offset : int, child_value : 
 	else:
 		file.seek(clipnodes_offset + child_value * CLIPNODES_STRUCT_SIZE)
 		read_clipnodes_recursive(file, clipnodes_offset)
-
 
 func convert_planes_to_points(convex_planes : Array[Plane]) -> PackedVector3Array :
 	# If you get errors about this, you're using a godot version that doesn't have this 

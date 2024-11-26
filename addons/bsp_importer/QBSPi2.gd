@@ -5,6 +5,7 @@
 
 
 ## based on documentation from:
+## 
 ## https://jheriko-rtw.blogspot.com/2010/11/dissecting-quake-2-bsp-format.html
 ## https://www.flipcode.com/archives/Quake_2_BSP_File_Format.shtml
 ##
@@ -22,13 +23,13 @@ enum {
 	LUMP_FACE,
 	LUMP_LIGHTMAP,
 	LUMP_LEAVES,
-	LUMP_LEAFFACETABLE,
-	LUMP_LEAFBRUSHTABLE,
+	LUMP_LEAF_FACE_TABLE,
+	LUMP_LEAF_BRUSH_TABLE,
 	LUMP_EDGE,
 	LUMP_FACE_EDGE,
 	LUMP_MODEL,
 	LUMP_BRUSH,
-	LUMP_BRUSHSIDE
+	LUMP_BRUSH_SIDE
 }
 
 @export var textures_path : String = "res://materials/quake2_textures/"
@@ -40,6 +41,8 @@ var geometry := {}
 var textures := {}
 
 var entities := []
+
+var models := []
 
 
 ## returns the raw bsp bytes.
@@ -78,10 +81,22 @@ class BSPTexture extends Node:
 
 class BSPEntity extends Node3D:
 	var default_class_data : Dictionary = {}
-	
-	func updatename() -> void:
-		if default_class_data.has("classname"):
-			self.name = default_class_data.get("classname")
+	func updatename() -> void: if default_class_data.has("classname"): self.name = default_class_data.get("classname")
+
+class BSPPlane extends Node:
+	var normal := Vector3.ZERO
+	var distance : float = 0
+	var type : int = 0 # ? 
+
+class BSPBrush extends Node:
+	var first_brush_side : int = 0
+	var num_brush_side : int = 0
+	var flags : int = 0
+
+class BSPBrushSide extends Node:
+	var plane_index : int = 0
+	var texture_information : int = 0
+
 
 func check_for_dir(dir):
 	if not DirAccess.dir_exists_absolute(dir): DirAccess.make_dir_absolute(dir)
@@ -104,12 +119,17 @@ func convertBSPtoScene(file_path : String) -> Node:
 	CenterNode.name = cnn
 	
 	CenterNode.add_child(MeshInstance)
-	CenterNode.add_child(CollisionShape)
 	
 	MeshInstance.owner = CenterNode
-	CollisionShape.owner = CenterNode
 	
-	CollisionShape.shape = MeshInstance.mesh.create_trimesh_shape()
+	var collisions = create_collisions()
+	
+	for collision in collisions:
+		var cs = CollisionShape3D.new()
+		CenterNode.add_child(cs)
+		cs.owner = CenterNode
+		cs.shape = collision
+		cs.name = str('brush', RID(collision).get_id())
 	
 	return CenterNode
 
@@ -125,35 +145,50 @@ func convert_to_mesh(file):
 	var directory = fetch_directory(bsp_bytes)
 	
 	# i regret this code!
+	var plane_lmp = range(directory[LUMP_PLANE].get(LUMP_OFFSET), directory[LUMP_PLANE].get(LUMP_OFFSET)+directory[LUMP_PLANE].get(LUMP_LENGTH))
+	
+	
 	var vertex_lmp = range(directory[LUMP_VERTEX].get(LUMP_OFFSET), directory[LUMP_VERTEX].get(LUMP_OFFSET)+directory[LUMP_VERTEX].get(LUMP_LENGTH))
 	var face_edge_lmp = range(directory[LUMP_FACE_EDGE].get(LUMP_OFFSET), directory[LUMP_FACE_EDGE].get(LUMP_OFFSET)+directory[LUMP_FACE_EDGE].get(LUMP_LENGTH))
+	
 	var face_lmp = range(directory[LUMP_FACE].get(LUMP_OFFSET), directory[LUMP_FACE].get(LUMP_OFFSET)+directory[LUMP_FACE].get(LUMP_LENGTH))
 	var edge_lmp = range(directory[LUMP_EDGE].get(LUMP_OFFSET), directory[LUMP_EDGE].get(LUMP_OFFSET)+directory[LUMP_EDGE].get(LUMP_LENGTH))
 	
 	var texture_lmp = range(directory[LUMP_TEXTURE].get(LUMP_OFFSET), directory[LUMP_TEXTURE].get(LUMP_OFFSET)+directory[LUMP_TEXTURE].get(LUMP_LENGTH))
-	
 	var entity_lmp = range(directory[LUMP_ENT].get(LUMP_OFFSET), directory[LUMP_ENT].get(LUMP_OFFSET)+directory[LUMP_ENT].get(LUMP_LENGTH))
+	
+	var model_lmp = range(directory[LUMP_MODEL].get(LUMP_OFFSET), directory[LUMP_MODEL].get(LUMP_OFFSET)+directory[LUMP_MODEL].get(LUMP_LENGTH))
+	
+	var brush_lmp = range(directory[LUMP_BRUSH].get(LUMP_OFFSET), directory[LUMP_BRUSH].get(LUMP_OFFSET)+directory[LUMP_BRUSH].get(LUMP_LENGTH))
+	var brush_side_lmp = range(directory[LUMP_BRUSH_SIDE].get(LUMP_OFFSET), directory[LUMP_BRUSH_SIDE].get(LUMP_OFFSET)+directory[LUMP_BRUSH_SIDE].get(LUMP_LENGTH))
+	
 	
 	entities = process_entity_lmp(bytes(bsp_bytes, entity_lmp))
 	
-	print(entities)
+	
+	models = get_models(bytes(bsp_bytes, model_lmp))
 	
 	geometry = {}
 	textures = {}
-	
+	geometry["plane"] = get_planes(bytes(bsp_bytes, plane_lmp))
 	geometry["vertex"] = get_verts(bytes(bsp_bytes, vertex_lmp))
 	geometry["face"] = get_face_lump(bytes(bsp_bytes, face_lmp))
 	
 	geometry["edge"] = get_edges(bytes(bsp_bytes, edge_lmp))
 	geometry["face_edge"] = get_face_edges(bytes(bsp_bytes, face_edge_lmp))
 	
+	geometry["brush"] = get_brushes(bytes(bsp_bytes, brush_lmp))
+	geometry["brush_side"] = get_brush_sides(bytes(bsp_bytes, brush_side_lmp))
+	
 	textures["lumps"] = get_texture_lmp(bytes(bsp_bytes, texture_lmp))
+	
 	
 	process_to_mesh_array(geometry)
 	
 	var mesh = create_mesh(geometry["face"])
 	var mi = MeshInstance3D.new()
 	var arm = ArrayMesh.new()
+	
 	
 	for surface in mesh.get_surface_count():
 		arm.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, mesh.surface_get_arrays(surface))
@@ -264,6 +299,66 @@ func fetch_directory(bsp_bytes):
 		
 	return dir
 
+func get_planes(plane_bytes : PackedByteArray) -> Array[BSPPlane]:
+	var planes : Array[BSPPlane] = []
+	var count = plane_bytes.size() / 20
+	if randi_range(0, 1000000) == 10284: 
+		print("QBSPi2 Calculated Estimate of %s Planes, hopefully no towers are around...." % count) # why did i push this to github?
+	else: 
+		print("QBSPi2 Calculated Estimate of %s Planes." % count)
+	
+	for index in range(0, plane_bytes.size(), 20):
+		var norm_x = bytes(plane_bytes, range(index + 0, index + 4)).decode_float(0)
+		var norm_y = bytes(plane_bytes, range(index + 4, index + 8)).decode_float(0)
+		var norm_z = bytes(plane_bytes, range(index + 8, index + 12)).decode_float(0)
+		
+		var distance = bytes(plane_bytes, range(index + 12, index + 16)).decode_float(0)
+		
+		var type = bytes(plane_bytes, range(index + 16, index + 20)).decode_u32(0)
+		
+		var plane = BSPPlane.new()
+		plane.normal = Vector3(-norm_y, norm_z, -norm_x)
+		plane.distance = distance
+		plane.type = type
+		planes.append(plane)
+	return planes
+
+
+func get_brushes(brush_bytes : PackedByteArray):
+	var count = brush_bytes.size() / 12
+	print("QBSPi2 Calculated Estimate of %s Brushes" % count)
+	var brushes = []
+	for index in range(0, brush_bytes.size(), 12):
+		var brush = BSPBrush.new()
+		var first_brush_side = bytes(brush_bytes, range(index + 0, index + 4)).decode_u32(0)
+		var num_brush_side = bytes(brush_bytes, range(index + 4, index + 8)).decode_u32(0)
+		var flags = bytes(brush_bytes, range(index + 8, index + 12)).decode_u32(0)
+		
+		brush.first_brush_side = first_brush_side
+		brush.num_brush_side = num_brush_side
+		brush.flags = flags
+		
+		brushes.append(brush)
+	return brushes
+
+func get_brush_sides(brush_side_bytes : PackedByteArray):
+	var count = brush_side_bytes.size() / 4
+	print("QBSPi2 Calculated Estimate of %s Brush Sides" % count)
+	var brush_sides = []
+	for index in range(0, brush_side_bytes.size(), 4):
+		
+		var plane_index = bytes(brush_side_bytes, range(index + 0, index + 2)).decode_u16(0)
+		var texture_information = bytes(brush_side_bytes, range(index + 2, index + 4)).decode_s16(0)
+		
+		var brush_side = BSPBrushSide.new()
+		
+		
+		brush_side.plane_index = plane_index
+		brush_side.texture_information = texture_information
+		
+		brush_sides.append(brush_side)
+	return brush_sides
+
 ## returns vertex lump
 func get_verts(vert_bytes : PackedByteArray) -> PackedVector3Array:
 	var count = vert_bytes.size() / 12
@@ -277,7 +372,7 @@ func get_verts(vert_bytes : PackedByteArray) -> PackedVector3Array:
 		var ybytes = bytes(vert_bytes, range( (v * 12) + 4, (v * 12) + 8 )).decode_float(0)
 		var zbytes = bytes(vert_bytes, range( (v * 12) + 8, (v * 12) + 12 )).decode_float(0)
 		
-		var vec = Vector3(xbytes, zbytes, ybytes)
+		var vec = Vector3(-ybytes, zbytes, -xbytes)
 		vertex_array.append(vec)
 		v += 1
 	return vertex_array
@@ -382,12 +477,55 @@ func get_face_edges(face_bytes : PackedByteArray):
 		var f1 = bytes(face_bytes, range(index + 0, index + 4)).decode_s32(0)
 		face_edges.append(f1)
 		f += 1
-
+	
 	return face_edges
 
-## creates and returns an ImmediateMesh, as of right now uses the edges but should use tris.
+## i dont know what models are used for but if someone could tell me that would be good.
+func get_models(model_bytes : PackedByteArray):
+	var count = model_bytes.size() / 48
+	prints("QBSPi2 Calculated Estimate of %s Models" % count)
+	
+	for m in range(0, model_bytes.size(), 48):
+		var a1 = bytes(model_bytes, range(m + 0, m + 4)).decode_float(0)
+		var a2 = bytes(model_bytes, range(m + 4, m + 8)).decode_float(0)
+		var b1 = bytes(model_bytes, range(m + 8, m + 12)).decode_float(0)
+		var b2 = bytes(model_bytes, range(m + 12, m + 16)).decode_float(0)
+		var c1 = bytes(model_bytes, range(m + 16, m + 20)).decode_float(0)
+		var c2 = bytes(model_bytes, range(m + 20, m + 24)).decode_float(0)
+		
+		var ox = bytes(model_bytes, range(m + 24, m + 28)).decode_float(0)
+		var oy = bytes(model_bytes, range(m + 28, m + 32)).decode_float(0)
+		var oz = bytes(model_bytes, range(m + 32, m + 36)).decode_float(0)
+		
+		var head = bytes(model_bytes, range(m + 36, m + 40)).decode_s32(0)
+		
+		var first_face = bytes(model_bytes, range(m + 40, m + 44)).decode_u32(0)
+		var num_faces = bytes(model_bytes, range(m + 44, m + 48)).decode_u32(0)
+		
+	return []
 
-## this has some issues with materials being duplicated as each texture has its own surface and sometimes with complicated maps it overruns the max surface count, someone pls fix 
+func create_collisions():
+	var collisions = []
+	for brush in geometry["brush"]:
+		var brush_planes : Array[Plane] = []
+		brush = brush as BSPBrush
+		var brush_side_range = range(brush.first_brush_side, (brush.first_brush_side + brush.num_brush_side))
+		
+		for brush_side_index in brush_side_range:
+			var brush_side = geometry["brush_side"][brush_side_index]
+			var plane = geometry["plane"][brush_side.plane_index] as BSPPlane
+			
+			var plane_vec = Plane(plane.normal, plane.distance)
+			
+			brush_planes.append(plane_vec)
+		
+		var verts = Geometry3D.compute_convex_mesh_points(brush_planes)
+		var collision = ConvexPolygonShape3D.new()
+		
+		collision.set_points(verts)
+		collisions.append(collision)
+	
+	return collisions
 
 func create_mesh(face_data : Array) -> Mesh:
 	var mesh = ArrayMesh.new()
@@ -410,7 +548,7 @@ func create_mesh(face_data : Array) -> Mesh:
 	
 	for face in face_data:
 		face = face as BSPFace
-		var texture =  textures["lumps"][face.texture_index]
+		var texture =  textures["lumps"][face.texture_index] as BSPTexture
 		
 		if surface_list.has(texture.texture_path):
 			var material = StandardMaterial3D.new()
@@ -435,10 +573,11 @@ func create_mesh(face_data : Array) -> Mesh:
 			
 			material_list[surface_tool] = material
 			
+			
 			var verts = face.verts
 			if not material.albedo_color.a == 0:
 				for vertIndex in range(0, verts.size(), 3):
-				
+					
 					var v0 = verts[vertIndex + 0]
 					var v1 = verts[vertIndex + 1]
 					var v2 = verts[vertIndex + 2]
@@ -447,44 +586,30 @@ func create_mesh(face_data : Array) -> Mesh:
 					var uv1 = get_uv(v1, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
 					var uv2 = get_uv(v2, texture.u_axis, texture.v_axis, texture.u_offset, texture.v_offset, matTexture.get_size())
 					
-					var normal : Vector3 = (v1 - v0).cross((v2 - v0))
+					var plane = geometry["plane"][face.plane] as BSPPlane
+					#var normal : Vector3 = (v1 - v0).cross((v2 - v0))
+					var normal : Vector3 = plane.normal
 					
 					surface_tool.set_material(material)
 					
 					surface_tool.set_normal(normal.normalized())
 					surface_tool.set_uv(uv0)
-					surface_tool.add_vertex(v0 / 32.0)
+					surface_tool.add_vertex(v0)
 					
-					surface_tool.set_normal(normal.normalized())
 					
 					surface_tool.set_uv(uv1)
-					surface_tool.add_vertex(v1 / 32.0)
+					surface_tool.add_vertex(v1)
 					
-					surface_tool.set_normal(normal.normalized())
 					surface_tool.set_uv(uv2)
-					surface_tool.add_vertex(v2 / 32.0)
+					surface_tool.add_vertex(v2)
 	
 	
 	for tool in surface_list.values():
 		tool = tool as SurfaceTool
 		mesh = tool.commit(mesh) as ArrayMesh
-	prints("\n\n\n QBSPi2 - Completed Mesh With %s Surfaces" % mesh.get_surface_count(), ".\nMissing Textures:", missing_textures)
+	prints("\n\n\n QBSPi2 - Completed Mesh With %s Surfaces" % mesh.get_surface_count())
+	if missing_textures.size() > 0: prints(".\nMissing Textures:", missing_textures, "Some Faces may be invisible, Trust me they're there the surface albedo is just 0!")
 	return mesh
-
-
-#
-#mesh.surface_set_normal(normal.normalized())
-#
-#mesh.surface_set_uv(uv0)
-#mesh.surface_add_vertex(v0 / 32.0)
-#
-#mesh.surface_set_uv(uv1)
-#mesh.surface_add_vertex(v1 / 32.0)
-#
-#mesh.surface_set_uv(uv2)
-#mesh.surface_add_vertex(v2 / 32.0)
-#
-
 
 
 func get_uv(vertex : Vector3, u_axis : Vector3, v_axis : Vector3, u_offset : float, v_offset : float, tex_size : Vector2) -> Vector2:
