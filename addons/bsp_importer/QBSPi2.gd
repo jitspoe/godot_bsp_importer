@@ -506,6 +506,7 @@ func get_models(model_bytes : PackedByteArray):
 
 func create_collisions():
 	var collisions = []
+	var final_verts = []
 	for brush in geometry["brush"]:
 		var brush_planes : Array[Plane] = []
 		brush = brush as BSPBrush
@@ -515,7 +516,7 @@ func create_collisions():
 			var brush_side = geometry["brush_side"][brush_side_index]
 			var plane = geometry["plane"][brush_side.plane_index] as BSPPlane
 			
-			var plane_vec = Plane(plane.normal, plane.distance)
+			var plane_vec = Plane(plane.normal, plane.distance / 32.0)
 			
 			brush_planes.append(plane_vec)
 		
@@ -594,14 +595,14 @@ func create_mesh(face_data : Array) -> Mesh:
 					
 					surface_tool.set_normal(normal.normalized())
 					surface_tool.set_uv(uv2)
-					surface_tool.add_vertex(v2)
+					surface_tool.add_vertex(v2 / 32.0)
 					
 					
 					surface_tool.set_uv(uv1)
-					surface_tool.add_vertex(v1)
+					surface_tool.add_vertex(v1 / 32.0)
 					
 					surface_tool.set_uv(uv0)
-					surface_tool.add_vertex(v0)
+					surface_tool.add_vertex(v0 / 32.0)
 	
 	
 	for tool in surface_list.values():
