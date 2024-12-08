@@ -131,6 +131,8 @@ func convertBSPtoScene(file_path : String) -> Node:
 		cs.shape = collision
 		cs.name = str('brush', RID(collision).get_id())
 	
+	place_entities(entities, CenterNode)
+	
 	return CenterNode
 
 ## Central Function
@@ -198,6 +200,53 @@ func convert_to_mesh(file):
 	
 	return mi
 
+
+func place_entities(entities : Array, owner_node):
+	var world_node = Node3D.new(); 
+	owner_node.add_child(world_node)
+	world_node.name = str("WorldObjects"); 
+	world_node.owner = owner_node
+	
+	var spawn_nodes = Node3D.new()
+	world_node.add_child(spawn_nodes)
+	spawn_nodes.name = str("Spawns")
+	spawn_nodes.owner = owner_node
+	prints(world_node.get_parent(), world_node.owner)
+	
+	for entity in entities:
+		entity = entity as BSPEntity
+		
+		if entity.default_class_data.get("classname") == "info_player_deathmatch":
+			var team_names = ["TeamRed", "TeamBlue"]
+			var team = entity.default_class_data.get("teamnumber").to_int()-1
+			var team_name = team_names[team]
+			
+			if not spawn_nodes.has_node(team_name):
+				var n = Node3D.new()
+				n.name = str(team_name)
+				
+				spawn_nodes.add_child(n)
+				n.owner = owner_node
+				
+			
+			if spawn_nodes.has_node(team_name):
+				var vector_pos = origin_to_vec(entity.default_class_data.get("origin"))
+				
+				var spawn_node = Node3D.new()
+				spawn_nodes.get_node(team_name).add_child(spawn_node)
+				spawn_node.owner = owner_node
+				spawn_node.transform.origin = vector_pos / 32.0
+	
+	
+	
+	return world_node
+
+func origin_to_vec(origin : String) -> Vector3:
+	var v = Vector3.ZERO
+	var pos = origin.split(" ")
+	var vec = Vector3(pos[0].to_int(), pos[1].to_int(), pos[2].to_int())
+	v = BSPReader.new().convert_vector_from_quake_unscaled(vec)
+	return v
 
 ## takes the vertex, face, edge and face edge arrays and outputs an array of all the edge points.
 func process_to_mesh_array(geometry : Dictionary) -> void:
