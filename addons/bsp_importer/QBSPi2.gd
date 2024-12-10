@@ -131,6 +131,9 @@ func convertBSPtoScene(file_path : String) -> Node:
 		cs.shape = collision
 		cs.name = str('brush', RID(collision).get_id())
 	
+	CenterNode.set_collision_layer_value(2, true)
+	CenterNode.set_collision_mask_value(2, true)
+
 	place_entities(entities, CenterNode)
 	
 	return CenterNode
@@ -211,15 +214,28 @@ func place_entities(entities : Array, owner_node):
 	world_node.add_child(spawn_nodes)
 	spawn_nodes.name = str("Spawns")
 	spawn_nodes.owner = owner_node
-	prints(world_node.get_parent(), world_node.owner)
 	
+	var weapon_spawns = Node3D.new()
+	spawn_nodes.add_child(weapon_spawns)
+	weapon_spawns.name = str("Weapons")
+	weapon_spawns.owner = owner_node
+	 
 	for entity in entities:
 		entity = entity as BSPEntity
 		
-		if entity.default_class_data.get("classname") == "info_player_deathmatch":
+		
+		if entity.default_class_data.get("classname") == "weapon_pballgun":
+			var weapon_node = Node3D.new()
+			var vector_pos = origin_to_vec(entity.default_class_data.get("origin"))
+			weapon_spawns.add_child(weapon_node)
+			weapon_node.name = str("weapon_pballgun_", entity.default_class_data.get("type"))
+			weapon_node.owner = owner_node
+			weapon_node.transform.origin = vector_pos
+		
+		if entity.default_class_data.get("classname") == "info_player_deathmatch" and entity.default_class_data.has("teamnumber"):
 			var team_names = ["TeamRed", "TeamBlue"]
-			var team = entity.default_class_data.get("teamnumber").to_int()-1
-			var team_name = team_names[team]
+			var team = str(entity.default_class_data.get("teamnumber")).to_int()-1
+			var team_name = team_names[wrapi(team, 0, 2)]
 			
 			if not spawn_nodes.has_node(team_name):
 				var n = Node3D.new()
@@ -228,6 +244,7 @@ func place_entities(entities : Array, owner_node):
 				spawn_nodes.add_child(n)
 				n.owner = owner_node
 				
+				
 			
 			if spawn_nodes.has_node(team_name):
 				var vector_pos = origin_to_vec(entity.default_class_data.get("origin"))
@@ -235,8 +252,16 @@ func place_entities(entities : Array, owner_node):
 				var spawn_node = Node3D.new()
 				spawn_nodes.get_node(team_name).add_child(spawn_node)
 				spawn_node.owner = owner_node
-				spawn_node.transform.origin = vector_pos / 32.0
-	
+				spawn_node.transform.origin = vector_pos# / 32.0
+				
+				
+				
+			
+			
+			
+		
+		
+		
 	
 	
 	return world_node
@@ -268,8 +293,6 @@ func process_to_mesh_array(geometry : Dictionary) -> void:
 		var face_vert_out = []
 		
 		for edge in edge_range:
-			
-			
 			
 			var face_edge = face_edges[edge]
 			
@@ -381,11 +404,13 @@ func get_brushes(brush_bytes : PackedByteArray):
 		var brush = BSPBrush.new()
 		var first_brush_side = bytes(brush_bytes, range(index + 0, index + 4)).decode_u32(0)
 		var num_brush_side = bytes(brush_bytes, range(index + 4, index + 8)).decode_u32(0)
-		var flags = bytes(brush_bytes, range(index + 8, index + 12)).decode_u32(0)
+		var flags = bytes(brush_bytes, range(index + 8, index + 10)).decode_u16(0) 
+		#var flags2 = bytes(brush_bytes, range(index + 10, index + 12)).decode_u16(0) 
 		
 		brush.first_brush_side = first_brush_side
 		brush.num_brush_side = num_brush_side
 		brush.flags = flags
+		
 		
 		brushes.append(brush)
 	return brushes
@@ -560,20 +585,22 @@ func create_collisions():
 		var brush_planes : Array[Plane] = []
 		brush = brush as BSPBrush
 		var brush_side_range = range(brush.first_brush_side, (brush.first_brush_side + brush.num_brush_side))
+		#print(brush.flags)
 		
-		for brush_side_index in brush_side_range:
-			var brush_side = geometry["brush_side"][brush_side_index]
-			var plane = geometry["plane"][brush_side.plane_index] as BSPPlane
+		if brush.flags == 1:
+			for brush_side_index in brush_side_range:
+				var brush_side = geometry["brush_side"][brush_side_index]
+				var plane = geometry["plane"][brush_side.plane_index] as BSPPlane
+				
+				var plane_vec = Plane(plane.normal, plane.distance / 32.0)
+				
+				brush_planes.append(plane_vec)
 			
-			var plane_vec = Plane(plane.normal, plane.distance / 32.0)
+			var verts = Geometry3D.compute_convex_mesh_points(brush_planes)
+			var collision = ConvexPolygonShape3D.new()
 			
-			brush_planes.append(plane_vec)
-		
-		var verts = Geometry3D.compute_convex_mesh_points(brush_planes)
-		var collision = ConvexPolygonShape3D.new()
-		
-		collision.set_points(verts)
-		collisions.append(collision)
+			collision.set_points(verts)
+			collisions.append(collision)
 	
 	return collisions
 
@@ -609,10 +636,10 @@ func create_mesh(face_data : Array) -> Mesh:
 				#prints("QBSPi2 Cannot Find File '%s'. Ensure The File Exists." % (textures_path + texture.texture_path + ".jpg"))
 			
 			
-			var matTexture = load("res://icon.svg")
+			var matTexture = ResourceLoader.load("res://icon.svg", "Texture2D")
 			
 			if FileAccess.file_exists(textures_path + texture.texture_path + ".jpg"):
-				matTexture = load(textures_path + texture.texture_path + ".jpg")
+				matTexture = ResourceLoader.load(textures_path + texture.texture_path + ".jpg", "Texture2D")
 			else:
 				material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 				material.albedo_color.a = 0
