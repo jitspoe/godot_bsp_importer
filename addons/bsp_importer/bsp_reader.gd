@@ -568,15 +568,15 @@ func read_bsp(source_file : String) -> Node:
 	print("Attempting to import %s" % source_file)
 	print("Material path pattern: ", material_path_pattern)
 	file = FileAccess.open(source_file, FileAccess.READ)
-
+	
 	if (!file):
 		error = FileAccess.get_open_error()
 		print("Failed to open %s: %d" % [source_file, error])
 		return null
-
+	
 	root_node = Node3D.new()
 	root_node.name = source_file.get_file().get_basename() # Get the file out of the path and remove file extension
-
+	
 	# Read the header
 	var is_q2 := false
 	is_bsp2 = false
@@ -587,17 +587,31 @@ func read_bsp(source_file : String) -> Node:
 	var index_bits_32 := false
 	print("BSP version: %d\n" % bsp_version)
 	if (bsp_version == 1347633737): # "IBSP" - Quake 2 BSP format
-		print("IBSP (Quake2?) format - not supported, yet.")
+		
+		var bsp_q2_texts = [
+			"Moving File %s to QBSPi2" % source_file.get_file().get_basename(),
+			"QBSPi2 is Our Lord and Savior!, said literally no one ever.",
+			"Why did jitspoe decide QBSPi2 should be in here??",
+			"Why did I decide QBSPi2 would be a fun project?? like?? why???",
+			
+		]
+		
+		prints("Quake 2 BSP Format Detected.", bsp_q2_texts.pick_random())
+		
+		# Keeping these for safety!
+		
 		is_q2 = true
 		has_textures = false
 		has_clipnodes = false
 		has_brush_table = true
 		bsp_version = file.get_32()
-		print("BSP sub-version: %d\n" % bsp_version)
 		
+		
+		
+		print("BSP sub-version: %d\n" % bsp_version)
 		file.close()
 		file = null
-		return
+		return BSPi2.new().convertBSPtoScene(source_file)
 	if (bsp_version == 1112756274): # "2PSB" - depricated extended quake BSP format.
 		print("2PSB format not supported.")
 		file.close()
@@ -1621,7 +1635,6 @@ func handle_clip_child(file : FileAccess, clipnodes_offset : int, child_value : 
 	else:
 		file.seek(clipnodes_offset + child_value * CLIPNODES_STRUCT_SIZE)
 		read_clipnodes_recursive(file, clipnodes_offset)
-
 
 func convert_planes_to_points(convex_planes : Array[Plane]) -> PackedVector3Array :
 	# If you get errors about this, you're using a godot version that doesn't have this 
