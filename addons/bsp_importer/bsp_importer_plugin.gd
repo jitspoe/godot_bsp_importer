@@ -163,15 +163,15 @@ func _get_import_options(path : String, preset_index : int):
 				},
 				{
 					"name" : "water_scene_template",
-					"default_value" : "res://addons/bsp_importer/water_example_template.tscn"
+					"default_value" : "res://addons/bsp_importer/examples/water_example_template.tscn"
 				},
 				{
 					"name" : "slime_scene_template",
-					"default_value" : "res://addons/bsp_importer/slime_example_template.tscn"
+					"default_value" : "res://addons/bsp_importer/examples/slime_example_template.tscn"
 				},
 				{
 					"name" : "lava_scene_template",
-					"default_value" : "res://addons/bsp_importer/lava_example_template.tscn"
+					"default_value" : "res://addons/bsp_importer/examples/lava_example_template.tscn"
 				},
 				{
 					"name" : "entity_path_pattern",
