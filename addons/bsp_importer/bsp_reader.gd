@@ -1403,7 +1403,6 @@ func convert_planes_to_points(convex_planes : Array[Plane]) -> PackedVector3Arra
 
 # BSPTexture is optional, for handling Q1 BSP files that have textures embedded.
 func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null) -> MaterialInfo:
-	print("load_or_create_material")
 	var width := 0
 	var height := 0
 	var material : Material = null
@@ -1431,7 +1430,7 @@ func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null)
 		if (texture):
 			width = texture.get_width()
 			height = texture.get_height()
-			print("External image width: ", width, " height: ", height)
+			print(name, ": External image width: ", width, " height: ", height)
 	else:
 		print("Could not load ", original_image_path)
 	var image_emission_path : String
@@ -1443,7 +1442,7 @@ func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null)
 	if (material && !overwrite_existing_materials):
 		# Try to get the width and height off of the material.
 		if (width == 0 || height == 0):
-			print("Texture size is 0.  Attempting to get texture size from material.")
+			print(name, ": Texture size is 0.  Attempting to get texture size from material.")
 			if (material is BaseMaterial3D):
 				print("Attempting to get image size from base material.")
 				texture = material.albedo_texture
@@ -1465,7 +1464,7 @@ func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null)
 			else:
 				print("No texture found in material.")
 	else: # Need to create a material.
-		print("Need to create a material.")
+		print(name, ": Need to create a material.")
 		var image : Image = null
 		var image_emission : Image = null
 		if (!texture || overwrite_existing_textures): # Try creating image from the texture in the BSP file.
@@ -1526,7 +1525,7 @@ func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null)
 			#print("albedo_texture set to ", material.albedo_texture)
 			if (image_emission):
 				texture_emission = ImageTexture.create_from_image(image_emission)
-			print("texture_emission = ", texture_emission)
+			#print("texture_emission = ", texture_emission)
 			if (texture_emission):
 				print("Emission enabled.")
 				material.emission_enabled = true
