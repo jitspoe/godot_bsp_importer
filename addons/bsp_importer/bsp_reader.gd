@@ -290,6 +290,7 @@ var plane_normals : PackedVector3Array
 var plane_distances : PackedFloat32Array
 var model_scenes : Dictionary = {}
 var is_bsp2 := false
+var is_bsp3 := false
 var _unit_scale : float = 1.0
 var import_lights := true
 var light_brightness_scale := 16.0
@@ -358,42 +359,50 @@ func read_bsp(source_file : String) -> Node:
 	# Read the header
 	var is_q2 := false
 	is_bsp2 = false
+	var is_q3 = false
+	is_bsp3 = false
 	var has_textures := true
 	var has_clipnodes := true
 	var has_brush_table := false
 	var bsp_version := file.get_32()
 	var index_bits_32 := false
 	print("BSP version: %d\n" % bsp_version)
-
-	if (bsp_version == 1347633737): # "IBSP" - Quake 2 BSP format
-		var bsp_q2_texts = [
-			"Moving File %s to QBSPi2" % source_file.get_file().get_basename(),
-			"QBSPi2 is Our Lord and Savior!, said literally no one ever.",
-			"Why did jitspoe decide QBSPi2 should be in here??",
-			"Why did I decide QBSPi2 would be a fun project?? like?? why???",
-			
-		]
 		
-		prints("Quake 2 BSP Format Detected.", bsp_q2_texts.pick_random())
-		
+	if (bsp_version == 1347633737): # "IBSP" - Quake 2 BSP format and possibly Quake 3
 		# Keeping these for safety!
 		is_q2 = true
 		has_textures = false
 		has_clipnodes = false
 		has_brush_table = true
-		bsp_version = file.get_32()
+		var sub_version = file.get_32()
+		
+		if (sub_version == 46 or sub_version == 47):
+			# Quake 3 BSP format
+			is_q3 = true
+			print("Detected Quake 3 BSP (IBSP v%d)." % sub_version)
+			return convertBSP3toScene(source_file)
+		else:
+			var bsp_q2_texts = [
+				"Moving File %s to QBSPi2" % source_file.get_file().get_basename(),
+				"QBSPi2 is Our Lord and Savior!, said literally no one ever.",
+				"Why did jitspoe decide QBSPi2 should be in here??",
+				"Why did I decide QBSPi2 would be a fun project?? like?? why???",
+			]
+			prints("Detected Quake 2 BSP (IBSP v%d)." % sub_version, bsp_q2_texts.pick_random())
 
-		print("BSP sub-version: %d\n" % bsp_version)
+			return convertBSP2toScene(source_file)
+			
 		file.close()
 		file = null
-		return convertBSPtoScene(source_file)
 	if (bsp_version == 1112756274): # "2PSB" - depricated extended quake BSP format.
 		print("2PSB format not supported.")
 		file.close()
 		file = null
 		return
 	if (bsp_version == 844124994): # "BSP2" - extended Quake BSP format
-		print("BSP2 extended Quake format.")
+		# Read the next 32-bit int to check sub-version
+		var sub_version = file.get_32()
+		print("BSP sub-version: %d" % sub_version)
 		is_bsp2 = true
 		index_bits_32 = true
 	var entity_offset := file.get_32()
@@ -1695,7 +1704,7 @@ class BSPBrushSide:
 
 
 
-func convertBSPtoScene(file_path : String) -> Node:
+func convertBSP2toScene(file_path : String) -> Node:
 
 	prints("Converting File", file_path, ". Please Keep in Mind This is Still in Development and has some issues.")
 	
@@ -2268,3 +2277,485 @@ func bytes(input_array, indices : Array) -> PackedByteArray:
 	for index in indices:
 		output_array.append(input_array[index])
 	return output_array
+
+# Q3BSP Logic
+
+enum Q3 {
+	# Quake 3 Lumps (for IBSP 46/47)
+	LUMP_ENTITIES,
+	LUMP_TEXTURES,
+	LUMP_PLANES,
+	LUMP_NODES,
+	LUMP_LEAFS,
+	LUMP_LEAF_FACES,
+	LUMP_LEAF_BRUSHES,
+	LUMP_MODELS,
+	LUMP_BRUSHES,
+	LUMP_BRUSH_SIDES,
+	LUMP_VERTICES,
+	LUMP_MESHVERTS,
+	LUMP_EFFECTS,
+	LUMP_FACES,
+	LUMP_LIGHTMAPS,
+	LUMP_LIGHTVOLS,
+	LUMP_VISDATA,
+}
+
+const Q3_NUM_LUMPS = 17
+
+func convertBSP3toScene(file_path: String):
+	
+	prints("Converting File", file_path, ". Please Keep in Mind This is Still in Development and has some issues.")
+	
+	var file_name = file_path.get_base_dir()
+	print(file_name)
+	
+	var CenterNode = StaticBody3D.new()
+	var MeshInstance = convert_q3_to_mesh(file_path) 
+	var CollisionShape = CollisionShape3D.new()
+	
+	CenterNode.name = str("BSPi3_", file_path.get_basename().trim_prefix(file_path.get_base_dir())).replace("/", "")
+	
+	CenterNode.add_child(MeshInstance)
+	
+	MeshInstance.owner = CenterNode
+	
+	#var collisions = create_collisions()
+	#
+	#for collision in collisions:
+		#var cs = CollisionShape3D.new()
+		#CenterNode.add_child(cs)
+		#cs.owner = CenterNode
+		#cs.shape = collision
+		#cs.name = str('brush', RID(collision).get_id())
+	#
+	#CenterNode.set_collision_layer_value(2, true)
+	#CenterNode.set_collision_mask_value(2, true)
+
+	# place_entities(entities, CenterNode)
+	
+	return CenterNode
+
+func convert_q3_to_mesh(file_path: String) -> MeshInstance3D:
+	# Quake 3 lumps reading:
+	# After reading magic (IBSP) and version (46 or 47), the next 17 lumps follow.
+	var q3_lumps = []
+	q3_lumps.resize(Q3_NUM_LUMPS)
+	for i in range(Q3_NUM_LUMPS):
+		var lump_offset = file.get_32()
+		var lump_length = file.get_32()
+		q3_lumps[i] = { "offset": lump_offset, "length": lump_length }
+	
+	# Now we have all Q3 lumps in q3_lumps.
+	# Quake 3 lumps:
+	#  0: Entities
+	#  1: Shaders/Textures
+	#  2: Planes
+	#  3: Nodes
+	#  4: Leafs
+	#  5: Leaf Faces
+	#  6: Leaf Brushes
+	#  7: Models
+	#  8: Brushes
+	#  9: Brush Sides
+	# 10: Vertices
+	# 11: Meshverts
+	# 12: Effects
+	# 13: Faces
+	# 14: Lightmaps
+	# 15: Lightvols
+	# 16: Visdata
+
+	# Extract entities
+	var entities_offset = q3_lumps[Q3.LUMP_ENTITIES]["offset"]
+	var entities_length = q3_lumps[Q3.LUMP_ENTITIES]["length"]
+	file.seek(entities_offset)
+	var entity_string = file.get_buffer(entities_length).get_string_from_utf8()
+	var entity_dict_array = parse_entity_string(entity_string)
+	convert_entity_dict_to_scene(entity_dict_array)
+
+	# Extract textures (shaders)
+	var shaders_offset = q3_lumps[Q3.LUMP_TEXTURES]["offset"]
+	var shaders_length = q3_lumps[Q3.LUMP_TEXTURES]["length"]
+	# Read and store shader info from Q3 BSP. Each shader entry is 64 bytes (name 64 chars) + 4 bytes surface flags + 4 bytes content flags in standard Q3.
+	var shaders = read_q3_shaders(file, shaders_offset, shaders_length)
+
+	# Extract planes
+	var planes_offset = q3_lumps[Q3.LUMP_PLANES]["offset"]
+	var planes_length = q3_lumps[Q3.LUMP_PLANES]["length"]
+	# Each plane in Q3 BSP: 16 bytes (3 floats for normal + 1 float for dist).
+	var planes = read_q3_planes(file, planes_offset, planes_length)
+
+	# Extract vertices
+	var vertices_offset = q3_lumps[Q3.LUMP_VERTICES]["offset"]
+	var vertices_length = q3_lumps[Q3.LUMP_VERTICES]["length"]
+	# Q3 vertex: struct of (x,y,z), (st[0], st[1]), (lm_st[0], lm_st[1]), normal(3 floats), color(4 bytes)
+	var vertices = read_q3_vertices(file, vertices_offset, vertices_length)
+
+	# Extract faces
+	var faces_offset = q3_lumps[Q3.LUMP_FACES]["offset"]
+	var faces_length = q3_lumps[Q3.LUMP_FACES]["length"]
+	# Q3 face structure differs significantly from Q1/Q2. 
+	var faces = read_q3_faces(file, faces_offset, faces_length)
+	
+	# Extract meshverts
+	var meshverts_offset = q3_lumps[Q3.LUMP_MESHVERTS]["offset"]
+	var meshverts_length = q3_lumps[Q3.LUMP_MESHVERTS]["length"]
+	var meshvert_count = meshverts_length / 4
+	file.seek(meshverts_offset)
+	var meshverts = PackedInt32Array()
+	meshverts.resize(meshvert_count)
+	for i in range(meshvert_count):
+		meshverts[i] = file.get_32()
+
+	# After reading the lumps and data:
+	# Construct geometry, load materials/shaders, create mesh from Q3 faces.
+	return build_q3_geometry(planes, vertices, faces, meshverts, shaders, 0.1)
+	
+func read_q3_shaders(file: FileAccess, offset: int, length: int) -> Array:
+	var shaders = []
+	file.seek(offset)
+	var count = length / 72
+
+	for i in range(count):
+		# Read 64-byte name
+		var name_bytes = file.get_buffer(64)
+		var name_str = name_bytes.get_string_from_ascii()
+		# Shader names may be null-terminated and padded
+		# Strip everything after the first '\0', if any
+		var null_pos = name_str.find('\\0')
+		if null_pos != -1:
+			name_str = name_str.substr(0, null_pos)
+		name_str = name_str.strip_edges()
+
+		var surface_flags = file.get_32()
+		var content_flags = file.get_32()
+
+		shaders.append({
+			"name": name_str,
+			"surface_flags": surface_flags,
+			"content_flags": content_flags
+		})
+
+	return shaders
+
+func read_q3_planes(file: FileAccess, offset: int, length: int) -> Array:
+	var planes = []
+	file.seek(offset)
+	var count = length / 16
+	for i in range(count):
+		var nx = file.get_float()
+		var ny = file.get_float()
+		var nz = file.get_float()
+		var dist = file.get_float()
+		# Convert from Quake's coordinate system to Godot's
+		var normal = convert_vector_from_quake_unscaled(Vector3(nx, ny, nz))
+		planes.append({
+			"normal": normal,
+			"distance": dist
+		})
+	return planes
+
+func read_q3_vertices(file: FileAccess, offset: int, length: int) -> Array:
+	var vertices = []
+	file.seek(offset)
+	var count = length / 44
+
+	for i in range(count):
+		var px = file.get_float()
+		var py = file.get_float()
+		var pz = file.get_float()
+		var stx = file.get_float()
+		var sty = file.get_float()
+		var lmx = file.get_float()
+		var lmy = file.get_float()
+		var nx = file.get_float()
+		var ny = file.get_float()
+		var nz = file.get_float()
+		var c_r = file.get_8()
+		var c_g = file.get_8()
+		var c_b = file.get_8()
+		var c_a = file.get_8()
+
+		var position = convert_vector_from_quake_unscaled(Vector3(px, py, pz))
+		var normal = convert_vector_from_quake_unscaled(Vector3(nx, ny, nz))
+		# Convert color bytes [0..255] to float [0..1]
+		var color = Color(c_r/255.0, c_g/255.0, c_b/255.0, c_a/255.0)
+
+		vertices.append({
+			"position": position,
+			"uv": Vector2(stx, sty),
+			"lm_uv": Vector2(lmx, lmy),
+			"normal": normal,
+			"color": color
+		})
+	return vertices
+
+func read_q3_faces(file: FileAccess, offset: int, length: int) -> Array:
+	var faces: Array[Dictionary] = []
+	file.seek(offset)
+	var count = length / 104
+
+	for i in range(count):
+		var texture = file.get_32()
+		var effect = file.get_32()
+		var ftype = file.get_32()
+		var firstVert = file.get_32()
+		var numVerts = file.get_32()
+		var firstMeshvert = file.get_32()
+		var numMeshverts = file.get_32()
+		var lm_index = file.get_32()
+		var lm_start_s = file.get_32()
+		var lm_start_t = file.get_32()
+		var lm_size_w = file.get_32()
+		var lm_size_h = file.get_32()
+
+		var lm_origin_x = file.get_float()
+		var lm_origin_y = file.get_float()
+		var lm_origin_z = file.get_float()
+
+		var lm_vecs = []
+		for v_i in range(2):
+			var vx = file.get_float()
+			var vy = file.get_float()
+			var vz = file.get_float()
+			lm_vecs.append(convert_vector_from_quake_unscaled(Vector3(vx, vy, vz)))
+
+		var nx = file.get_float()
+		var ny = file.get_float()
+		var nz = file.get_float()
+		var normal = convert_vector_from_quake_unscaled(Vector3(nx, ny, nz))
+
+		var size_w = file.get_32()
+		var size_h = file.get_32()
+
+		var lm_origin = convert_vector_from_quake_unscaled(Vector3(lm_origin_x, lm_origin_y, lm_origin_z))
+
+		faces.append({
+			"texture": texture,
+			"effect": effect,
+			"type": ftype,
+			"first_vertex": firstVert,
+			"num_vertices": numVerts,
+			"first_meshvert": firstMeshvert,
+			"num_meshverts": numMeshverts,
+			"lm_index": lm_index,
+			"lm_start": Vector2(lm_start_s, lm_start_t),
+			"lm_size": Vector2(lm_size_w, lm_size_h),
+			"lm_origin": lm_origin,
+			"lm_vecs": lm_vecs,
+			"normal": normal,
+			"patch_size": Vector2(size_w, size_h)
+		})
+	return faces
+
+func build_q3_geometry(planes: Array, vertices: Array, faces: Array, meshverts: PackedInt32Array, textures: Array, unit_scale: float = 1.0) -> MeshInstance3D:
+	# Create a parent MeshInstance to hold the geometry
+	var mesh_instance = MeshInstance3D.new()
+	mesh_instance.name = "Q3Mesh"
+	mesh_instance.owner = root_node
+
+	var array_mesh = ArrayMesh.new()
+
+	# We might have multiple materials. We can create a dictionary from texture index to SurfaceTool.
+	var surface_tools = {}
+
+	# Iterate over each face and convert it into triangles
+	# Face fields used:
+	#   "type" (1=polygon, 3=mesh)
+	#   "first_vertex": base vertex index in 'vertices' array
+	#   "num_vertices": number of vertices for the face (for reference)
+	#   "first_meshvert": start index in meshverts array
+	#   "num_meshverts": number of meshverts (indices)
+	#   "texture": index of the shader/texture
+	#   vertices array elements have keys: "position", "normal", "uv", "color"
+	# 
+	# The actual vertex index for each meshvert m is: face.first_vertex + meshverts[face.first_meshvert + m]
+
+	for face in faces:
+		var ftype = face["type"]
+		if ftype != 1 and ftype != 3:
+			# Skip patch (2) and billboard (4) for this example
+			continue
+
+		var tex_index = face["texture"] # texture/shader index for this face
+		var st: SurfaceTool
+		
+		if surface_tools.has(tex_index):
+			st = surface_tools[tex_index]
+		else:
+			st = SurfaceTool.new()
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			# Load or assign a material for this texture index if you have texture/material info:
+			var mat = load_q3_material_for_texture(textures[tex_index]["name"]) # Implement this function as needed.
+			st.set_material(mat)
+			surface_tools[tex_index] = st
+
+		var first_vertex = face["first_vertex"]
+		var num_meshverts = face["num_meshverts"]
+		var first_meshvert = face["first_meshvert"]
+
+		# Extract all vertex indices for this face
+		var indices = []
+		for i in range(num_meshverts):
+			var vert_offset = meshverts[first_meshvert + i]
+			var vert_index = first_vertex + vert_offset
+			indices.append(vert_index)
+
+		# Q3 polygon faces are usually fans or strips. 
+		# The simplest approach is to fan triangulate assuming the face is a fan:
+		# (0, i+1, i+2) forms a triangle for i in range(num_meshverts-2)
+		# This works for many Q3 polygon faces (they are often fans).
+		# For mesh (type 3), these are often triangle fans/strips as well.
+		# If you need more complex handling, refer to Q3 BSP docs.
+
+		for i in range(num_meshverts - 2):
+			var idx0 = indices[0]
+			var idx1 = indices[i + 1]
+			var idx2 = indices[i + 2]
+
+			var v0 = vertices[idx0]
+			var v1 = vertices[idx1]
+			var v2 = vertices[idx2]
+
+			# Positions, normals already converted to Godot space in read_q3_vertices
+			var p0 = v0["position"] * unit_scale
+			var p1 = v1["position"] * unit_scale
+			var p2 = v2["position"] * unit_scale
+
+			var uv0 = v0["uv"]
+			var uv1 = v1["uv"]
+			var uv2 = v2["uv"]
+
+			var n0 = v0["normal"]
+			var n1 = v1["normal"]
+			var n2 = v2["normal"]
+
+			var c0 = v0["color"]
+			var c1 = v1["color"]
+			var c2 = v2["color"]
+
+			# Add these vertices to the SurfaceTool in clockwise or counterclockwise order
+			# Ensure correct winding (if not correct, swap idx1 and idx2)
+			st.set_normal(n0)
+			st.set_uv(uv0)
+			st.set_color(c0)
+			st.add_vertex(p0)
+
+			st.set_normal(n1)
+			st.set_uv(uv1)
+			st.set_color(c1)
+			st.add_vertex(p1)
+
+			st.set_normal(n2)
+			st.set_uv(uv2)
+			st.set_color(c2)
+			st.add_vertex(p2)
+
+	# Commit all surfaces
+	# Each texture index got its own SurfaceTool, so each texture is its own surface.
+	for tex_index in surface_tools.keys():
+		var st = surface_tools[tex_index]
+		st.generate_tangents() # optional
+		array_mesh = st.commit(array_mesh)
+
+	mesh_instance.mesh = array_mesh
+	return mesh_instance
+
+func load_q3_material_for_texture(name : StringName) -> Material:
+	var width := 0
+	var height := 0
+	var material : Material = null
+
+	var material_path : String
+	if (texture_material_rename.has(name)):
+		material_path = texture_material_rename[name]
+	else:
+		material_path = material_path_pattern.replace("{texture_name}", name)
+
+	var image_path : String
+	var texture : Texture2D = null
+	var texture_emission : Texture2D = null
+
+	if (texture_path_remap.has(name)):
+		image_path = texture_path_remap[name]
+	else:
+		image_path = texture_path_pattern.replace("{texture_name}", name)
+
+	var original_image_path := image_path
+	if (!ResourceLoader.exists(image_path)):
+		image_path = str(image_path.get_basename(), ".jpg") # Jpeg fallback
+	if (ResourceLoader.exists(image_path)):
+		texture = load(image_path)
+		if (texture):
+			width = texture.get_width()
+			height = texture.get_height()
+			print(name, ": External image width: ", width, " height: ", height)
+	else:
+		print("Could not load ", original_image_path)
+
+	var image_emission_path : String
+	image_emission_path = texture_emission_path_pattern.replace("{texture_name}", name)
+	if (ResourceLoader.exists(image_emission_path)):
+		texture_emission = load(image_emission_path)
+
+	if (ResourceLoader.exists(material_path)):
+		material = load(material_path)
+
+	if (material && !overwrite_existing_materials):
+		# Try to get the width/height from the existing material if needed
+		if ((width == 0 || height == 0) && material is BaseMaterial3D):
+			print("Attempting to get image size from base material for ", name)
+			texture = material.albedo_texture
+			if (texture):
+				width = texture.get_width()
+				height = texture.get_height()
+				print("Material texture width: ", width, " height: ", height)
+		elif (material && material is ShaderMaterial):
+			var parameters_to_check : PackedStringArray = [ "albedo_texture", "texture_albedo", "texture", "albedo", "texture_diffuse" ]
+			for param_name in parameters_to_check:
+				var test = material.get_shader_parameter(param_name)
+				if (test is Texture2D):
+					print("Got ", param_name, " from ShaderMaterial for ", name)
+					texture = test
+					if (width == 0 || height == 0):
+						width = texture.get_width()
+						height = texture.get_height()
+					break
+	else:
+		# Need to create a new material
+		print(name, ": Need to create a new material.")
+		if (texture && generate_texture_materials):
+			print("Creating material with texture for ", name)
+			material = StandardMaterial3D.new()
+			material.albedo_texture = texture
+			if (texture_emission):
+				material.emission_enabled = true
+				material.emission_texture = texture_emission
+			material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+			material.diffuse_mode = BaseMaterial3D.DIFFUSE_BURLEY
+			material.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+
+			if (save_separate_materials):
+				print("Save separate materials.")
+				# Optionally, if you need to write the texture or material to disk:
+				# In Q3, textures are usually external, so you don't need to create or write them out.
+				# Just skip if you don't need to do that.
+
+				var material_dir := material_path.get_base_dir()
+				print("Material dir: ", material_dir)
+				if (!DirAccess.dir_exists_absolute(material_dir)):
+					DirAccess.make_dir_recursive_absolute(material_dir)
+				var err := ResourceSaver.save(material, material_path)
+				if (err == OK):
+					print("Wrote material: ", material_path)
+					material.take_over_path(material_path)
+				else:
+					printerr("Failed to write to ", material_path)
+		else:
+			# No texture found, assign a fallback color
+			print("No texture found for ", name, ". Assigning random color.")
+			material = StandardMaterial3D.new()
+			material.albedo_color = Color(randf_range(0.0, 1.0), randf_range(0.0, 1.0), randf_range(0.0, 1.0))
+
+	return material

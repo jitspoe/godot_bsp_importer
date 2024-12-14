@@ -9,11 +9,22 @@
 [resource]
 script = ExtResource("3_3jh6d")
 inverse_scale_factor = 32.0
+generate_texture_materials = true
 material_path_pattern = "res://materials/{texture_name}_material.tres"
-transparent_texture_prefix = "{"
 texture_material_rename = {
 "texture_name1": "res://material/texture_name1_material.tres"
 }
+save_separate_materials = true
+overwrite_existing_materials = false
+texture_path_pattern = "res://textures/{texture_name}.png"
+texture_emission_path_pattern = "res://textures/{texture_name}_emission.png"
+texture_path_remap = {
+"texture_name1_example": "res://textures/texture_name1_example.png"
+}
+transparent_texture_prefix = "{"
+palette_palette_path = "res://textures/palette.lmp"
+fullbright_range = [224, 255]
+overwrite_existing_textures = false
 water_scene_template = ExtResource("5_5me6m")
 slime_scene_template = ExtResource("4_hntkd")
 lava_scene_template = ExtResource("2_amq21")
@@ -30,5 +41,4 @@ culling_textures_exclude = Array[StringName]([])
 separate_mesh_on_grid = false
 mesh_separation_grid_size = 256.0
 use_triangle_collision = false
-generate_texture_materials = true
 post_import_script = ""
