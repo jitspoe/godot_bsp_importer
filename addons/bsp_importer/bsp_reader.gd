@@ -935,8 +935,7 @@ func read_bsp(source_file : String) -> Node:
 			printerr("Invalid script path: ", post_import_script_path)
 	#print("Post import nodes: ", post_import_nodes)
 	for node in post_import_nodes:
-		if (node.has_method("post_import")):
-			node.post_import(root_node)
+		node.post_import(root_node)
 
 	file.close()
 	file = null
