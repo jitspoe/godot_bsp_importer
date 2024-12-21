@@ -1408,7 +1408,7 @@ func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null)
 	var material : Material = null
 	if (bsp_texture):
 		width = bsp_texture.width
-		height = bsp_texture.hegiht
+		height = bsp_texture.height
 	var material_path : String
 	if (texture_material_rename.has(name)):
 		material_path = texture_material_rename[name]
