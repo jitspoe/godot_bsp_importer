@@ -150,9 +150,12 @@ class BSPTexture:
 		print("texture: ", name, " width: ", width, " height: ", height)
 		if (name != &"skip" && name != &"trigger" && name != &"waterskip" && name != &"slimeskip" && name != &"clip"):
 			var material_info := reader.load_or_create_material(name, self)
-			material = material_info.material
-			width = material_info.width
-			height = material_info.height
+			if (material_info):
+				material = material_info.material
+				width = material_info.width
+				height = material_info.height
+			else:
+				printerr("Failed to load or create material for ", name)
 		return get_data_size()
 
 
@@ -1408,7 +1411,7 @@ func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null)
 	var material : Material = null
 	if (bsp_texture):
 		width = bsp_texture.width
-		height = bsp_texture.hegiht
+		height = bsp_texture.height
 	var material_path : String
 	if (texture_material_rename.has(name)):
 		material_path = texture_material_rename[name]
