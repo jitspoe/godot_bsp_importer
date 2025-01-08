@@ -293,7 +293,7 @@ func _import(source_file : String, save_path : String, options : Dictionary, r_p
 
 	var bsp_scene := bsp_reader.read_bsp(source_file)
 	if (!bsp_scene):
-		return bsp_scene.error
+		return bsp_reader.error
 
 	var packed_scene := PackedScene.new()
 	var err := packed_scene.pack(bsp_scene)
