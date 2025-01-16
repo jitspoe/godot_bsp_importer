@@ -91,6 +91,7 @@ func _get_import_options(path : String, preset_index : int):
 				bsp_preset.separate_mesh_on_grid = import_config.get_value("params", "separate_mesh_on_grid", false)
 				bsp_preset.mesh_separation_grid_size = import_config.get_value("params", "mesh_separation_grid_size", 256.0)
 				bsp_preset.use_triangle_collision = import_config.get_value("params", "use_triangle_collision", false)
+				bsp_preset.ignore_missing_entities = import_config.get_value("params", "ignore_missing_entities", false)
 				bsp_preset.post_import_script = import_config.get_value("params", "post_import_script", "")
 
 		if (!bsp_preset):
@@ -216,6 +217,10 @@ func _get_import_options(path : String, preset_index : int):
 					"default_value" : 256.0
 				},
 				{
+					"name" : "ignore_missing_entities",
+					"default_value" : false
+				},
+				{
 					"name" : "post_import_script",
 					"default_value" : ""
 				}]
@@ -260,6 +265,7 @@ func _import(source_file : String, save_path : String, options : Dictionary, r_p
 		bsp_reader.use_triangle_collision = preset.use_triangle_collision
 		bsp_reader.separate_mesh_on_grid = preset.separate_mesh_on_grid
 		bsp_reader.mesh_separation_grid_size = preset.mesh_separation_grid_size
+		bsp_reader.ignore_missing_entities = preset.ignore_missing_entities
 		bsp_reader.post_import_script_path = preset.post_import_script
 	else:
 		print("Importing BSP from import settings.")
@@ -289,6 +295,7 @@ func _import(source_file : String, save_path : String, options : Dictionary, r_p
 		bsp_reader.use_triangle_collision = options.use_triangle_collision
 		bsp_reader.separate_mesh_on_grid = options.separate_mesh_on_grid
 		bsp_reader.mesh_separation_grid_size = options.mesh_separation_grid_size
+		bsp_reader.ignore_missing_entities = options.ignore_missing_entities
 		bsp_reader.post_import_script_path = options.post_import_script
 
 	var bsp_scene := bsp_reader.read_bsp(source_file)

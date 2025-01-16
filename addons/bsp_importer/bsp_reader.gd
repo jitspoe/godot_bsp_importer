@@ -302,6 +302,7 @@ var use_triangle_collision := false
 var culling_textures_exclude : Array[StringName]
 var generate_lightmap_uv2 := true
 var post_import_script_path : String
+var ignore_missing_entities := false
 var separate_mesh_on_grid := false
 var generate_texture_materials := false
 var overwrite_existing_materials := false
@@ -1009,6 +1010,7 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 			else:
 				if (classname != WORLDSPAWN_STRING_NAME):
 					scene_path = entity_path_pattern.replace("{classname}", classname)
+			
 			if (!scene_path.is_empty() && ResourceLoader.exists(scene_path)):
 				var scene_resource = load(scene_path)
 				if (!scene_resource):
@@ -1075,7 +1077,8 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 				else:
 					if (classname != WORLDSPAWN_STRING_NAME):
 						if (!scene_path.is_empty()):
-							printerr("Could not open ", scene_path, " for classname: ", classname)
+							if not ignore_missing_entities:
+								printerr("Could not open ", scene_path, " for classname: ", classname)
 						else:
 							printerr("No entity remap found for ", classname, ".  Ignoring.")
 
@@ -1727,8 +1730,8 @@ func convertBSPtoScene(file_path : String) -> Node:
 	
 	CenterNode.set_collision_layer_value(2, true)
 	CenterNode.set_collision_mask_value(2, true)
-
-	place_entities(entities, CenterNode)
+	
+	#place_entities(entities, CenterNode)
 	
 	return CenterNode
 
@@ -1762,8 +1765,7 @@ func convert_to_mesh(file):
 	var brush_side_lmp = range(directory[LUMP_BRUSH_SIDE].get(LUMP_OFFSET), directory[LUMP_BRUSH_SIDE].get(LUMP_OFFSET)+directory[LUMP_BRUSH_SIDE].get(LUMP_LENGTH))
 	
 	
-	entities = process_entity_lmp(bytes(bsp_bytes, entity_lmp))
-	
+	process_entity_lmp(bytes(bsp_bytes, entity_lmp))
 	
 	models = get_models(bytes(bsp_bytes, model_lmp))
 	
@@ -1798,55 +1800,26 @@ func convert_to_mesh(file):
 	return mi
 
 
-func place_entities(entities : Array, owner_node):
-	var world_node = Node3D.new(); 
-	owner_node.add_child(world_node)
-	world_node.name = str("WorldObjects"); 
-	world_node.owner = owner_node
-	
-	var spawn_nodes = Node3D.new()
-	world_node.add_child(spawn_nodes)
-	spawn_nodes.name = str("Spawns")
-	spawn_nodes.owner = owner_node
-	
-	var weapon_spawns = Node3D.new()
-	spawn_nodes.add_child(weapon_spawns)
-	weapon_spawns.name = str("Weapons")
-	weapon_spawns.owner = owner_node
-	 
-	for entity in entities:
-		entity = entity as BSPEntity
-		
-		
-		if entity.default_class_data.get("classname") == "weapon_pballgun":
-			var weapon_node = Node3D.new()
-			var vector_pos = origin_to_vec(entity.default_class_data.get("origin"))
-			weapon_spawns.add_child(weapon_node)
-			weapon_node.name = str("weapon_pballgun_", entity.default_class_data.get("type"))
-			weapon_node.owner = owner_node
-			weapon_node.transform.origin = vector_pos
-		
-		if entity.default_class_data.get("classname") == "info_player_deathmatch" and entity.default_class_data.has("teamnumber"):
-			var team_names = ["TeamRed", "TeamBlue"]
-			var team = str(entity.default_class_data.get("teamnumber")).to_int()-1
-			var team_name = team_names[wrapi(team, 0, 2)]
-			
-			if not spawn_nodes.has_node(team_name):
-				var n = Node3D.new()
-				n.name = str(team_name)
-				
-				spawn_nodes.add_child(n)
-				n.owner = owner_node
-
-			if spawn_nodes.has_node(team_name):
-				var vector_pos = origin_to_vec(entity.default_class_data.get("origin"))
-				
-				var spawn_node = Node3D.new()
-				spawn_nodes.get_node(team_name).add_child(spawn_node)
-				spawn_node.owner = owner_node
-				spawn_node.transform.origin = vector_pos# / 32.0
-
-	return world_node
+#func place_entities(entities : Array, owner_node):
+	#var world_node = Node3D.new(); 
+	#owner_node.add_child(world_node)
+	#world_node.name = str("WorldObjects"); 
+	#world_node.owner = owner_node
+	#
+	#var spawn_nodes = Node3D.new()
+	#world_node.add_child(spawn_nodes)
+	#spawn_nodes.name = str("Spawns")
+	#spawn_nodes.owner = owner_node
+	#
+	#var weapon_spawns = Node3D.new()
+	#spawn_nodes.add_child(weapon_spawns)
+	#weapon_spawns.name = str("Weapons")
+	#weapon_spawns.owner = owner_node
+	 #
+	#for entity in entities:
+		#entity = entity as BSPEntity
+	#
+	#return world_node
 
 func origin_to_vec(origin : String) -> Vector3:
 	var v = Vector3.ZERO
@@ -1911,30 +1884,11 @@ func process_to_mesh_array(geometry : Dictionary) -> void:
 		
 		face.verts = face_vert_out
 
-func process_entity_lmp(ent_bytes : PackedByteArray):
+func process_entity_lmp(ent_bytes : PackedByteArray) -> void:
 	prints("a unicode passing error may accur, this is 'normal'.")
-	var entities : Dictionary = process_json(ent_bytes.get_string_from_utf8())
-	var entity_list = entities.get("data")
-	
-	var entity_output = []
-	
-	for entity in entity_list:
-		if entity is Dictionary:
-			var entityNode = BSPEntity.new()
-			if entity.has("classname") and ClassDB.class_exists(entity.get("classname")):
-				entityNode = ClassDB.instantiate(entity.get("classname"))
-			else:
-				entityNode.default_class_data = entity
-			entityNode.updatename()
-			entity_output.append(entityNode)
-	
-	return entity_output
-
-func process_json(string):
-	var replaced_string = string.replace('" "', '":"').replace('"\n', '",\n').replace("}", "},")
-	replaced_string = str('{"data":[', replaced_string, "]}")
-	return JSON.parse_string(replaced_string)
-
+	var entity_string : String = ent_bytes.get_string_from_utf8()
+	var entity_output = parse_entity_string(entity_string)
+	var parsed = convert_entity_dict_to_scene(entity_output)
 
 ## grabs the directory
 func fetch_directory(bsp_bytes):
