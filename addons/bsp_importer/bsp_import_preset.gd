@@ -53,5 +53,7 @@ class_name BSPImportPreset
 @export var mesh_separation_grid_size := 256.0
 ## If true, use triangle collision from the visual geometry instead of convex brush collisions.  Faster to import, but usually slower for the physics performance.
 @export var use_triangle_collision := false
+## If true, the error message when importing a missing entity will not be printed.
+@export var ignore_missing_entities := false
 ## Script to execute after importing for any custom post-import cleanup.
 @export_file("*.gd") var post_import_script := ""
