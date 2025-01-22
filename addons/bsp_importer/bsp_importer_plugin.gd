@@ -68,6 +68,7 @@ func _get_import_options(path : String, preset_index : int):
 			if (!import_config.has_section_key("params", "preset")):
 				bsp_preset = BSPImportPreset.new()
 				bsp_preset.inverse_scale_factor = import_config.get_value("params", "inverse_scale_factor", 32.0)
+				bsp_preset.ignored_flags = import_config.get_value("params", "ignored_flags", PackedInt64Array())
 				bsp_preset.generate_texture_materials = import_config.get_value("params", "generate_texture_materials", true)
 				bsp_preset.save_separate_materials = import_config.get_value("params", "save_separate_materials", true)
 				bsp_preset.material_path_pattern = import_config.get_value("params", "material_path_pattern", "res://materials/{texture_name}_material.tres")
@@ -113,6 +114,10 @@ func _get_import_options(path : String, preset_index : int):
 				return [{
 					"name" : "inverse_scale_factor",
 					"default_value" : 32.0
+				},
+				{
+					"name" : "ignored_flags",
+					"default_value" : PackedInt64Array()
 				},
 				{
 					"name" : "generate_texture_materials",
@@ -240,6 +245,7 @@ func _import(source_file : String, save_path : String, options : Dictionary, r_p
 	if (preset):
 		print("Importing BSP from preset.")
 		bsp_reader.inverse_scale_fac = preset.inverse_scale_factor
+		bsp_reader.ignored_flags = preset.ignored_flags
 		bsp_reader.generate_texture_materials = preset.generate_texture_materials
 		bsp_reader.save_separate_materials = preset.save_separate_materials
 		bsp_reader.overwrite_existing_materials = preset.overwrite_existing_materials
@@ -270,6 +276,7 @@ func _import(source_file : String, save_path : String, options : Dictionary, r_p
 	else:
 		print("Importing BSP from import settings.")
 		bsp_reader.inverse_scale_fac = options.inverse_scale_factor
+		bsp_reader.ignored_flags = options.ignored_flags
 		bsp_reader.generate_texture_materials = options.generate_texture_materials
 		bsp_reader.save_separate_materials = options.save_separate_materials
 		bsp_reader.overwrite_existing_materials = options.overwrite_existing_materials

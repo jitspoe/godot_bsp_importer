@@ -4,6 +4,8 @@ class_name BSPImportPreset
 
 ## Number of Quake units per meter
 @export var inverse_scale_factor := 32.0
+## Flags the BSP Reader will ignore when generating geometry (Quake 2 Only)
+@export var ignored_flags : PackedInt64Array = []
 ## If true, automatically generate materials from the textures.
 @export var generate_texture_materials := true
 ## {texture_name} will be replaced by the texture name in the BSP file.
