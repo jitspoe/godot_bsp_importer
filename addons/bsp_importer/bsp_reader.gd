@@ -196,9 +196,10 @@ class BSPFace:
 	var light_model_1 : int
 	var lightmap : int
 	
-	# Q3 stuff isnt needed with the current construction method but i'll probably figure that out later, otherwise that would go here. - cs
+	# most Q3 stuff isnt needed with the current construction method but i'll probably figure that out later, otherwise that would go here. - cs
 	
 	var verts : PackedVector3Array = [] # For Mesh Construction
+	var q3_uvs : PackedVector2Array
 	var vert_normal : Vector3 = Vector3.ZERO
 	var face_normal : Vector3 = Vector3.ZERO
 	
@@ -1663,6 +1664,7 @@ func generate_default_palette():
 enum {LUMP_OFFSET, LUMP_LENGTH}
 var geometry := {}
 var textures := {}
+var lightmap_textures = []
 
 var entities := []
 
@@ -1691,30 +1693,31 @@ func convertBSPtoScene(file_path : String) -> Node:
 	var file_name = file_path.get_base_dir()
 	print(file_name)
 	
-	var CenterNode = StaticBody3D.new()
+	root_node = StaticBody3D.new()
 	var MeshInstance = convert_to_mesh(file_path) 
 	var CollisionShape = CollisionShape3D.new()
 	
-	var cnn = str("BSPi2_", file_path.get_basename().trim_prefix(file_path.get_base_dir())).replace("/", "")
-	CenterNode.name = cnn
+	var cnn = str("BSP_", file_path.get_basename().trim_prefix(file_path.get_base_dir())).replace("/", "")
+	root_node.name = cnn
 	
-	CenterNode.add_child(MeshInstance)
+	root_node.add_child(MeshInstance)
 	
-	MeshInstance.owner = CenterNode
+	MeshInstance.owner = root_node
 	
 	var collisions = create_collisions()
 	
 	for collision in collisions:
 		var cs = CollisionShape3D.new()
-		CenterNode.add_child(cs)
-		cs.owner = CenterNode
+		root_node.add_child(cs)
+		cs.owner = root_node
 		cs.shape = collision
 		cs.name = str('brush', RID(collision).get_id())
 	
-	CenterNode.set_collision_layer_value(2, true)
-	CenterNode.set_collision_mask_value(2, true)
+	root_node.set_collision_layer_value(2, true)
+	root_node.set_collision_mask_value(2, true)
 	
-	return CenterNode
+	
+	return root_node
 
 const Q2_TABLE = [
   "LUMP_ENTITIES",
@@ -1750,8 +1753,8 @@ const Q3_TABLE = [
   "LUMP_MESH_VERTEX",
   "LUMP_EFFECT",
   "LUMP_FACE",
-  "LUMP_LIGHTMAPS",
-  "LUMP_LIGHTVOLS",
+  "LUMP_LIGHTMAP",
+  "LUMP_LIGHTVOL",
   "LUMP_VISDATA",
 ]
 
@@ -1788,6 +1791,9 @@ func convert_to_mesh(file, table : PackedStringArray = Q2_TABLE):
 	
 	var mi := MeshInstance3D.new()
 	
+	process_entity_lmp(bytes(bsp_bytes, lmp_table.LUMP_ENTITIES))
+	
+	
 	if QBSPi3:
 		textures["lumps"] = get_texture_lmp(bytes(bsp_bytes, lmp_table.LUMP_TEXTURE))
 		geometry["vertex"] = get_verts(bytes(bsp_bytes, lmp_table.LUMP_VERTEX))
@@ -1796,10 +1802,12 @@ func convert_to_mesh(file, table : PackedStringArray = Q2_TABLE):
 		OS.delay_msec(100) # some weird issue here, delaying seems to fix it
 		geometry["face"] = get_face_lump(bytes(bsp_bytes, lmp_table.LUMP_FACE))
 		
+		lightmap_textures = get_lightmap_lump(bytes(bsp_bytes, lmp_table.LUMP_LIGHTMAP))
+		
+	
 	
 	if QBSPi2:
 		
-		process_entity_lmp(bytes(bsp_bytes, lmp_table.LUMP_ENTITIES))
 		models = get_models(bytes(bsp_bytes, lmp_table.LUMP_MODEL))
 		
 		geometry["plane"] = get_planes(bytes(bsp_bytes, lmp_table.LUMP_PLANE))
@@ -1832,6 +1840,24 @@ func origin_to_vec(origin : String) -> Vector3:
 	return v
 
 
+func get_lightmap_lump(data : PackedByteArray) -> Array[ImageTexture]:
+	var output : Array[ImageTexture] = []
+	if QBSPi3:
+		var count = data.size() / 49152
+		
+		for i in range(0, count, 1):
+			var texture : Image = Image.create(128, 128, false, Image.FORMAT_RGB8)
+			for x in range(0, 128):
+				for y in range(0, 128):
+					var index : int = i * 49152 + y * (128 * 3) + x * 3
+					var r : int = data[index]
+					var g : int = data[index + 1]
+					var b : int = data[index + 2]
+					#prints(r, g, b)
+					
+					texture.set_pixel(x, y, Color(r, g, b) / 255.0)
+			output.append(ImageTexture.create_from_image(texture))
+	return output
 
 ## takes the vertex, face, edge and face edge arrays and outputs an array of all the edge points.
 func process_to_mesh_array(geometry : Dictionary) -> void:
@@ -1892,7 +1918,7 @@ func process_entity_lmp(ent_bytes : PackedByteArray) -> void:
 	var entity_string : String = ent_bytes.get_string_from_utf8()
 	var entity_output = parse_entity_string(entity_string)
 	var parsed = convert_entity_dict_to_scene(entity_output)
-	print(entity_output)
+	
 
 ## grabs the directory
 func fetch_directory(bsp_bytes):
@@ -1987,6 +2013,7 @@ func get_mesh_verts(vert_bytes : PackedByteArray) -> PackedInt64Array:
 ## returns vertex lump
 func get_verts(vert_bytes : PackedByteArray) -> PackedVector3Array:
 	var vertex_array : PackedVector3Array = []
+	#return vertex_array
 	if QBSPi3:
 		geometry["vertex_uv_q3"] = []
 		geometry["normal"] = []
@@ -1998,31 +2025,30 @@ func get_verts(vert_bytes : PackedByteArray) -> PackedVector3Array:
 		var v = 0
 		
 		while v < count:
-			var xbytes = bytes(vert_bytes, range( (v * 44) + 0, (v * 44) + 4 )).decode_float(0)
-			var ybytes = bytes(vert_bytes, range( (v * 44) + 4, (v * 44) + 8 )).decode_float(0)
-			var zbytes = bytes(vert_bytes, range( (v * 44) + 8, (v * 44) + 12 )).decode_float(0)
+			var index = (v * 44)
+			var xbytes = bytes(vert_bytes, range( index + 0, index + 4 )).decode_float(0)
+			var ybytes = bytes(vert_bytes, range( index + 4, index + 8 )).decode_float(0)
+			var zbytes = bytes(vert_bytes, range( index + 8, index + 12 )).decode_float(0)
 			var vertex_vec = Vector3(-ybytes, zbytes, -xbytes)
 			
-			# documentation is not the same between sources, might be UV, might be lightmaps. i dont know. - cs
+			var u1 = (bytes(vert_bytes, range( index + 12, index + 16 )).decode_float(0))
+			var v1 = (bytes(vert_bytes, range( index + 16, index + 20 )).decode_float(0))
+			var u2 = bytes(vert_bytes, range( index + 20, index + 24 )).decode_float(0)
+			var v2 = bytes(vert_bytes, range( index + 24, index + 28 )).decode_float(0)
 			
-			var u1 = bytes(vert_bytes, range( (v * 44) + 12, (v * 44) + 16 )).decode_float(0)
-			var u2 = bytes(vert_bytes, range( (v * 44) + 16, (v * 44) + 20 )).decode_float(0)
-			var v1 = bytes(vert_bytes, range( (v * 44) + 20, (v * 44) + 24 )).decode_float(0)
-			var v2 = bytes(vert_bytes, range( (v * 44) + 24, (v * 44) + 28 )).decode_float(0)
-			var nx = bytes(vert_bytes, range( (v * 44) + 28, (v * 44) + 32 )).decode_float(0)
-			var ny = bytes(vert_bytes, range( (v * 44) + 32, (v * 44) + 36 )).decode_float(0)
-			var nz = bytes(vert_bytes, range( (v * 44) + 36, (v * 44) + 40 )).decode_float(0)
+			var nx = bytes(vert_bytes, range( index + 28, index + 32 )).decode_float(0)
+			var ny = bytes(vert_bytes, range( index + 32, index + 36)).decode_float(0)
+			var nz = bytes(vert_bytes, range( index + 36, index + 40)).decode_float(0)
 			var normal_vec = Vector3(-ybytes, zbytes, -xbytes)
 			
-			
-			var CR = bytes(vert_bytes, range( (v * 44) + 40, (v * 44) + 41 )).decode_u8(0)
-			var CG = bytes(vert_bytes, range( (v * 44) + 41, (v * 44) + 42 )).decode_u8(0)
-			var CB = bytes(vert_bytes, range( (v * 44) + 42, (v * 44) + 43 )).decode_u8(0)
-			var CA = bytes(vert_bytes, range( (v * 44) + 43, (v * 44) + 44 )).decode_u8(0)
+			var CR = bytes(vert_bytes, range( index + 40, index + 41)).decode_u8(0)
+			var CG = bytes(vert_bytes, range( index + 41, index + 42)).decode_u8(0)
+			var CB = bytes(vert_bytes, range( index + 42, index + 43)).decode_u8(0)
+			var CA = bytes(vert_bytes, range( index + 43, index + 44)).decode_u8(0)
 			var color = Color(CR / 255.0, CG / 255.0, CB / 255.0, CA / 255.0)
 			
 			
-			geometry["vertex_uv_q3"].append([Vector2(u1, u2), Vector2(v1, v2)])
+			geometry["vertex_uv_q3"].append([Vector2(u1, v1), Vector2(u2, v2)])
 			geometry["color"].append(color)
 			geometry["normal"].append(normal_vec)
 			
@@ -2083,6 +2109,7 @@ func get_face_lump(lump_bytes : PackedByteArray):
 			var face_normal = -convert_vector_from_quake_unscaled(Vector3(fnx, fny, fnz))
 			
 			var out_verts : PackedVector3Array = []
+			var out_uvs = []
 			var polygon_verts : PackedVector3Array = []
 			var mesh_verts = []
 			
@@ -2091,11 +2118,14 @@ func get_face_lump(lump_bytes : PackedByteArray):
 			match type:
 				1: # Polygon face
 					for i in vert_range: polygon_verts.append(geometry["vertex"][i])
-					for v in mesh_verts: out_verts.append(polygon_verts[v])
+					for v in mesh_verts: 
+						out_verts.append(polygon_verts[v])
+						out_uvs.append(geometry["vertex_uv_q3"][v][0])
 			
 			new_face.texinfo_id = texture
 			new_face.verts = out_verts
 			new_face.face_normal = face_normal
+			new_face.q3_uvs = out_uvs
 			faces.append(new_face)
 			f += 1
 	
@@ -2215,7 +2245,7 @@ func get_face_edges(face_bytes : PackedByteArray):
 
 ## i dont know what models are used for but if someone could tell me that would be good.
 func get_models(model_bytes : PackedByteArray):
-	var count = model_bytes.size() / 48
+	var count = model_bytes.size() / 48 
 	prints("QBSPi2 Calculated Estimate of %s Models" % count)
 	
 	for m in range(0, model_bytes.size(), 48):
@@ -2271,7 +2301,7 @@ func create_mesh(face_data : Array[BSPFace]) -> Mesh:
 	var missing_textures := []
 	var mesh_arrays := []
 	mesh_arrays.resize(Mesh.ARRAY_MAX)
-	print(texture_list)
+	
 	# seperating them for reasons
 	if QBSPi3:
 		for texture in texture_list:
@@ -2291,26 +2321,27 @@ func create_mesh(face_data : Array[BSPFace]) -> Mesh:
 				if (!material_info):
 					material_info = load_or_create_material(texture.texture_path)
 					material_info_lookup[surface_tool] = material_info
-				var material := material_info.material
-				
+				var material : StandardMaterial3D = material_info.material
+				var width := material_info.width
+				var height := material_info.height
 				var verts = face.verts
+				
 				
 				for vertIndex in range(0, verts.size(), 3):
 					var v0 = verts[vertIndex + 0]
 					var v1 = verts[vertIndex + 1]
 					var v2 = verts[vertIndex + 2]
 					
-					var uv0 :Vector2= geometry["vertex_uv_q3"][geometry["vertex"].find(v0)][0]
-					var uv1 :Vector2= geometry["vertex_uv_q3"][geometry["vertex"].find(v1)][0]
-					var uv2 :Vector2= geometry["vertex_uv_q3"][geometry["vertex"].find(v2)][0]
+					var uv0 : Vector2 = face.q3_uvs[vertIndex + 2]
+					var uv1 : Vector2 = face.q3_uvs[vertIndex + 1]
+					var uv2 : Vector2 = face.q3_uvs[vertIndex + 0]
 					
-					var width := material_info.width
-					var height := material_info.height
+					
 					
 					surface_tool.set_material(material)
-					surface_tool.set_uv(uv0)
-					surface_tool.add_vertex(v0 / 32.0)
 					surface_tool.set_uv(uv1)
+					surface_tool.add_vertex(v0 / 32.0)
+					surface_tool.set_uv(uv0)
 					surface_tool.add_vertex(v1 / 32.0)
 					surface_tool.set_uv(uv2)
 					surface_tool.add_vertex(v2 / 32.0)
