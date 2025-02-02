@@ -2110,6 +2110,7 @@ func get_face_lump(lump_bytes : PackedByteArray):
 			
 			var out_verts : PackedVector3Array = []
 			var out_uvs = []
+			var temp_uvs = []
 			var polygon_verts : PackedVector3Array = []
 			var mesh_verts = []
 			
@@ -2117,10 +2118,12 @@ func get_face_lump(lump_bytes : PackedByteArray):
 				mesh_verts.append(geometry["mesh_vertex"][j])
 			match type:
 				1: # Polygon face
-					for i in vert_range: polygon_verts.append(geometry["vertex"][i])
+					for i in vert_range: 
+						polygon_verts.append(geometry["vertex"][i])
+						temp_uvs.append(geometry["vertex_uv_q3"][i])
 					for v in mesh_verts: 
 						out_verts.append(polygon_verts[v])
-						out_uvs.append(geometry["vertex_uv_q3"][v][0])
+						out_uvs.append(temp_uvs[v][0])
 			
 			new_face.texinfo_id = texture
 			new_face.verts = out_verts
@@ -2151,6 +2154,7 @@ func get_face_lump(lump_bytes : PackedByteArray):
 			f += 1
 		
 	return faces
+
 
 
 ## returns texture lump
@@ -2228,7 +2232,6 @@ func get_edges(edge_bytes : PackedByteArray):
 	
 	return edges
 
-
 ## returns face edge lump
 func get_face_edges(face_bytes : PackedByteArray):
 	var count = face_bytes.size() / 4
@@ -2242,7 +2245,6 @@ func get_face_edges(face_bytes : PackedByteArray):
 		f += 1
 	
 	return face_edges
-
 ## i dont know what models are used for but if someone could tell me that would be good.
 func get_models(model_bytes : PackedByteArray):
 	var count = model_bytes.size() / 48 
@@ -2309,7 +2311,7 @@ func create_mesh(face_data : Array[BSPFace]) -> Mesh:
 			
 			if not surface_list.has(texture.texture_path):
 				var st =  SurfaceTool.new()
-				prints("creating new tool for", texture.texture_path)
+				#prints("creating new tool for", texture.texture_path)
 				surface_list[texture.texture_path] = st
 				st.begin(Mesh.PRIMITIVE_TRIANGLES)
 		
@@ -2326,22 +2328,21 @@ func create_mesh(face_data : Array[BSPFace]) -> Mesh:
 				var height := material_info.height
 				var verts = face.verts
 				
-				
+				var tex_size_vec = Vector2(material_info.width, material_info.height)
 				for vertIndex in range(0, verts.size(), 3):
 					var v0 = verts[vertIndex + 0]
 					var v1 = verts[vertIndex + 1]
-					var v2 = verts[vertIndex + 2]
-					
-					var uv0 : Vector2 = face.q3_uvs[vertIndex + 2]
-					var uv1 : Vector2 = face.q3_uvs[vertIndex + 1]
-					var uv2 : Vector2 = face.q3_uvs[vertIndex + 0]
+					var v2 = verts[vertIndex + 2] 
 					
 					
+					var uv0 : Vector2 = face.q3_uvs[vertIndex + 0] 
+					var uv1 : Vector2 = face.q3_uvs[vertIndex + 1] 
+					var uv2 : Vector2 = face.q3_uvs[vertIndex + 2] 
 					
 					surface_tool.set_material(material)
-					surface_tool.set_uv(uv1)
-					surface_tool.add_vertex(v0 / 32.0)
 					surface_tool.set_uv(uv0)
+					surface_tool.add_vertex(v0 / 32.0)
+					surface_tool.set_uv(uv1)
 					surface_tool.add_vertex(v1 / 32.0)
 					surface_tool.set_uv(uv2)
 					surface_tool.add_vertex(v2 / 32.0)
