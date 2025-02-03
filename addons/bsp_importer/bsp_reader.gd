@@ -195,11 +195,14 @@ class BSPFace:
 	var light_model_0 : int
 	var light_model_1 : int
 	var lightmap : int
+	var lightmap_start : Vector2i
+	var lightmap_size : Vector2i
 	
 	# most Q3 stuff isnt needed with the current construction method but i'll probably figure that out later, otherwise that would go here. - cs
 	
 	var verts : PackedVector3Array = [] # For Mesh Construction
-	var q3_uvs : PackedVector2Array
+	var q3_uv : PackedVector2Array
+	var q3_uv2 : PackedVector2Array
 	var vert_normal : Vector3 = Vector3.ZERO
 	var face_normal : Vector3 = Vector3.ZERO
 	
@@ -1664,7 +1667,7 @@ func generate_default_palette():
 enum {LUMP_OFFSET, LUMP_LENGTH}
 var geometry := {}
 var textures := {}
-var lightmap_textures = []
+var lightmap_texture : Image
 
 var entities := []
 
@@ -1802,7 +1805,7 @@ func convert_to_mesh(file, table : PackedStringArray = Q2_TABLE):
 		OS.delay_msec(100) # some weird issue here, delaying seems to fix it
 		geometry["face"] = get_face_lump(bytes(bsp_bytes, lmp_table.LUMP_FACE))
 		
-		lightmap_textures = get_lightmap_lump(bytes(bsp_bytes, lmp_table.LUMP_LIGHTMAP))
+		lightmap_texture = get_lightmap_lump(bytes(bsp_bytes, lmp_table.LUMP_LIGHTMAP))
 		geometry["plane"] = get_planes(bytes(bsp_bytes, lmp_table.LUMP_PLANE))
 		
 		geometry["brush_side"] = get_brush_sides(bytes(bsp_bytes, lmp_table.LUMP_BRUSH_SIDE))
@@ -1844,13 +1847,13 @@ func origin_to_vec(origin : String) -> Vector3:
 	return v
 
 
-func get_lightmap_lump(data : PackedByteArray) -> Array[ImageTexture]:
-	var output : Array[ImageTexture] = []
+func get_lightmap_lump(data : PackedByteArray) -> Image:
+	var texture : Image = Image.create(0, 0, false, Image.FORMAT_RGB8)
 	if QBSPi3:
 		var count = data.size() / 49152
-		
+		texture = Image.create(128 * count + 128, 128, false, Image.FORMAT_RGB8)
+		print(count, texture.get_size())
 		for i in range(0, count, 1):
-			var texture : Image = Image.create(128, 128, false, Image.FORMAT_RGB8)
 			for x in range(0, 128):
 				for y in range(0, 128):
 					var index : int = i * 49152 + y * (128 * 3) + x * 3
@@ -1859,10 +1862,10 @@ func get_lightmap_lump(data : PackedByteArray) -> Array[ImageTexture]:
 					var b : int = data[index + 2]
 					#prints(r, g, b)
 					
-					texture.set_pixel(x, y, Color(r, g, b) / 255.0)
-			#texture.save_png("user://%s.png" % i)
-			output.append(ImageTexture.create_from_image(texture))
-	return output
+					texture.set_pixel(x + (i * 128), y, Color(r, g, b) / 255.0)
+		#texture.save_png("user://lightmap_data.png")
+		#output.append(ImageTexture.create_from_image(texture))
+	return texture
 
 ## takes the vertex, face, edge and face edge arrays and outputs an array of all the edge points.
 func process_to_mesh_array(geometry : Dictionary) -> void:
@@ -2049,6 +2052,7 @@ func get_verts(vert_bytes : PackedByteArray) -> PackedVector3Array:
 	#return vertex_array
 	if QBSPi3:
 		geometry["vertex_uv_q3"] = []
+		geometry["vertex_uv2_q3"] = []
 		geometry["normal"] = []
 		geometry["color"] = []
 		#return vertex_array
@@ -2081,7 +2085,8 @@ func get_verts(vert_bytes : PackedByteArray) -> PackedVector3Array:
 			var color = Color(CR / 255.0, CG / 255.0, CB / 255.0, CA / 255.0)
 			
 			
-			geometry["vertex_uv_q3"].append([Vector2(u1, v1), Vector2(u2, v2)])
+			geometry["vertex_uv_q3"].append(Vector2(u1, v1))
+			geometry["vertex_uv2_q3"].append(Vector2(u2, v2))
 			geometry["color"].append(color)
 			geometry["normal"].append(normal_vec)
 			
@@ -2132,6 +2137,17 @@ func get_face_lump(lump_bytes : PackedByteArray):
 			var first_mesh_vert = by.decode_s32(20)
 			var num_mesh_verts = by.decode_s32(24)
 			
+			var lightmap_index = by.decode_s32(28)
+			
+			var lightmap_stx = by.decode_s32(32) 
+			var lightmap_sty = by.decode_s32(36)
+			
+			var lightmap_six = by.decode_s32(40) 
+			var lightmap_siy = by.decode_s32(44)
+			
+			var lightmap_start = Vector2(lightmap_stx, lightmap_sty)
+			var lightmap_size = Vector2(lightmap_six, lightmap_siy)
+			
 			
 			var vert_range = range(first_vert, first_vert + num_verts)
 			var mesh_vert_range = range(first_mesh_vert, first_mesh_vert + num_mesh_verts)
@@ -2139,11 +2155,13 @@ func get_face_lump(lump_bytes : PackedByteArray):
 			var fnx = by.decode_float(88)
 			var fny = by.decode_float(92)
 			var fnz = by.decode_float(96)
-			var face_normal = -convert_vector_from_quake_unscaled(Vector3(fnx, fny, fnz))
+			var face_normal = convert_vector_from_quake_unscaled(Vector3(fnx, fny, fnz))
 			
 			var out_verts : PackedVector3Array = []
-			var out_uvs = []
-			var temp_uvs = []
+			var out_uv = []
+			var out_uv2 = []
+			var temp_uv = []
+			var temp_uv2 = []
 			var polygon_verts : PackedVector3Array = []
 			var mesh_verts = []
 			
@@ -2153,15 +2171,22 @@ func get_face_lump(lump_bytes : PackedByteArray):
 				1: # Polygon face
 					for i in vert_range: 
 						polygon_verts.append(geometry["vertex"][i])
-						temp_uvs.append(geometry["vertex_uv_q3"][i])
+						temp_uv.append(geometry["vertex_uv_q3"][i])
+						temp_uv2.append(geometry["vertex_uv2_q3"][i])
+					
 					for v in mesh_verts: 
 						out_verts.append(polygon_verts[v])
-						out_uvs.append(temp_uvs[v][0])
+						out_uv.append(temp_uv[v])
+						out_uv2.append(temp_uv2[v])
 			
+			new_face.lightmap = lightmap_index
+			new_face.lightmap_start = lightmap_start
+			new_face.lightmap_size = lightmap_size
 			new_face.texinfo_id = texture
 			new_face.verts = out_verts
 			new_face.face_normal = face_normal
-			new_face.q3_uvs = out_uvs
+			new_face.q3_uv = out_uv
+			new_face.q3_uv2 = out_uv
 			faces.append(new_face)
 			f += 1
 	
@@ -2333,6 +2358,16 @@ func create_collisions():
 	
 	return collisions
 
+func convert_face_uv2_for_lightmap(lightmap_index : int, lm_start : Vector2i, lm_size : Vector2i, lightmap_uv : Vector2) -> Vector2:
+	var atlas_size = Vector2(lightmap_texture.get_size()) # Size of the entire atlas
+	var lightmap_offset_in_atlas = Vector2i(lightmap_index * 128, 0)
+	var absolute_lm_start = Vector2(lightmap_offset_in_atlas) + Vector2(lm_start) 
+	var uv_offset_in_lightmap = Vector2(lightmap_uv) * Vector2(lm_size)
+	var absolute_uv = Vector2(absolute_lm_start) + Vector2(uv_offset_in_lightmap)
+	var normalized_uv = Vector2(absolute_uv) / Vector2(atlas_size)
+	return normalized_uv
+
+
 func create_mesh(face_data : Array[BSPFace]) -> Mesh:
 	var mesh = ArrayMesh.new()
 	var texture_list = textures["lumps"] if textures.has("lumps") else []
@@ -2372,19 +2407,26 @@ func create_mesh(face_data : Array[BSPFace]) -> Mesh:
 					var v1 = verts[vertIndex + 1]
 					var v2 = verts[vertIndex + 2] 
 					
+					var uv0 : Vector2 = face.q3_uv[vertIndex + 0]
+					var uv1 : Vector2 = face.q3_uv[vertIndex + 1]
+					var uv2 : Vector2 = face.q3_uv[vertIndex + 2]
 					
-					var uv0 : Vector2 = face.q3_uvs[vertIndex + 0] 
-					var uv1 : Vector2 = face.q3_uvs[vertIndex + 1] 
-					var uv2 : Vector2 = face.q3_uvs[vertIndex + 2] 
+					var lm_uv0 = convert_face_uv2_for_lightmap(face.lightmap, face.lightmap_start, face.lightmap_size, face.q3_uv2[vertIndex + 0])
+					var lm_uv1 = convert_face_uv2_for_lightmap(face.lightmap, face.lightmap_start, face.lightmap_size, face.q3_uv2[vertIndex + 1])
+					var lm_uv2 = convert_face_uv2_for_lightmap(face.lightmap, face.lightmap_start, face.lightmap_size, face.q3_uv2[vertIndex + 2])
 					
 					surface_tool.set_material(material)
+					surface_tool.set_normal(face.face_normal)
 					surface_tool.set_uv(uv0)
+					surface_tool.set_uv2(lm_uv0)
 					surface_tool.add_vertex(v0 / 32.0)
 					surface_tool.set_uv(uv1)
+					surface_tool.set_uv2(lm_uv1)
 					surface_tool.add_vertex(v1 / 32.0)
 					surface_tool.set_uv(uv2)
+					surface_tool.set_uv2(lm_uv2)
 					surface_tool.add_vertex(v2 / 32.0)
-					
+				
 	if QBSPi2:
 		for texture in texture_list:
 			texture = texture as BSPTextureInfo
