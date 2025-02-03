@@ -1741,14 +1741,14 @@ const Q2_TABLE = [
 const Q3_TABLE = [
   "LUMP_ENTITIES",
   "LUMP_TEXTURE",
-  "LUMP_PLANES", 
+  "LUMP_PLANE", 
   "LUMP_NODES",
   "LUMP_LEAVES",
   "LUMP_LEAF_FACE_TABLE",
   "LUMP_LEAF_BRUSH_TABLE",
   "LUMP_MODEL",
   "LUMP_BRUSH",
-  "LUMP_BRUSH_SIDES",
+  "LUMP_BRUSH_SIDE",
   "LUMP_VERTEX",
   "LUMP_MESH_VERTEX",
   "LUMP_EFFECT",
@@ -1803,6 +1803,10 @@ func convert_to_mesh(file, table : PackedStringArray = Q2_TABLE):
 		geometry["face"] = get_face_lump(bytes(bsp_bytes, lmp_table.LUMP_FACE))
 		
 		lightmap_textures = get_lightmap_lump(bytes(bsp_bytes, lmp_table.LUMP_LIGHTMAP))
+		geometry["plane"] = get_planes(bytes(bsp_bytes, lmp_table.LUMP_PLANE))
+		
+		geometry["brush_side"] = get_brush_sides(bytes(bsp_bytes, lmp_table.LUMP_BRUSH_SIDE))
+		geometry["brush"] = get_brushes(bytes(bsp_bytes, lmp_table.LUMP_BRUSH))
 		
 	
 	
@@ -1856,6 +1860,7 @@ func get_lightmap_lump(data : PackedByteArray) -> Array[ImageTexture]:
 					#prints(r, g, b)
 					
 					texture.set_pixel(x, y, Color(r, g, b) / 255.0)
+			#texture.save_png("user://%s.png" % i)
 			output.append(ImageTexture.create_from_image(texture))
 	return output
 
@@ -1939,26 +1944,43 @@ func fetch_directory(bsp_bytes):
 
 func get_planes(plane_bytes : PackedByteArray) -> Array[BSPPlane]:
 	var planes : Array[BSPPlane] = []
-	var count = plane_bytes.size() / 20
-	if randi_range(0, 1000000) == 10284: 
-		print("QBSPi2 Calculated Estimate of %s Planes, hopefully no towers are around...." % count) # why did i push this to github?
-	else: 
-		print("QBSPi2 Calculated Estimate of %s Planes." % count)
+	 
+	# basically 
 	
-	for index in range(0, plane_bytes.size(), 20):
-		var norm_x = bytes(plane_bytes, range(index + 0, index + 4)).decode_float(0)
-		var norm_y = bytes(plane_bytes, range(index + 4, index + 8)).decode_float(0)
-		var norm_z = bytes(plane_bytes, range(index + 8, index + 12)).decode_float(0)
+	if QBSPi3:
 		
-		var distance = bytes(plane_bytes, range(index + 12, index + 16)).decode_float(0)
-		
-		var type = bytes(plane_bytes, range(index + 16, index + 20)).decode_u32(0)
-		
-		var plane = BSPPlane.new()
-		plane.normal = Vector3(-norm_y, norm_z, -norm_x)
-		plane.distance = distance
-		plane.type = type
-		planes.append(plane)
+		var count = plane_bytes.size() / 16
+		print("QBSPi3 Calculated Estimate of %s Planes." % count)
+		for index in range(0, plane_bytes.size(), 16):
+			var norm_x = bytes(plane_bytes, range(index + 0, index + 4)).decode_float(0)
+			var norm_y = bytes(plane_bytes, range(index + 4, index + 8)).decode_float(0)
+			var norm_z = bytes(plane_bytes, range(index + 8, index + 12)).decode_float(0)
+			
+			var distance = bytes(plane_bytes, range(index + 12, index + 16)).decode_float(0)
+			
+			var plane = BSPPlane.new()
+			plane.normal = Vector3(-norm_y, norm_z, -norm_x)
+			plane.distance = distance
+			
+			planes.append(plane)
+	
+	if QBSPi2:
+		var count = plane_bytes.size() / 20
+		print("QBSPi2 Calculated Estimate of %s Planes." % count)
+		for index in range(0, plane_bytes.size(), 20):
+			var norm_x = bytes(plane_bytes, range(index + 0, index + 4)).decode_float(0)
+			var norm_y = bytes(plane_bytes, range(index + 4, index + 8)).decode_float(0)
+			var norm_z = bytes(plane_bytes, range(index + 8, index + 12)).decode_float(0)
+			
+			var distance = bytes(plane_bytes, range(index + 12, index + 16)).decode_float(0)
+			
+			var type = bytes(plane_bytes, range(index + 16, index + 20)).decode_u32(0)
+			
+			var plane = BSPPlane.new()
+			plane.normal = Vector3(-norm_y, norm_z, -norm_x)
+			plane.distance = distance
+			plane.type = type
+			planes.append(plane)
 	return planes
 
 
@@ -1966,12 +1988,19 @@ func get_brushes(brush_bytes : PackedByteArray):
 	var count = brush_bytes.size() / 12
 	print("QBSPi2 Calculated Estimate of %s Brushes" % count)
 	var brushes = []
+	
 	for index in range(0, brush_bytes.size(), 12):
 		var brush = BSPBrush.new()
 		var first_brush_side = bytes(brush_bytes, range(index + 0, index + 4)).decode_u32(0)
 		var num_brush_side = bytes(brush_bytes, range(index + 4, index + 8)).decode_u32(0)
 		var flags = bytes(brush_bytes, range(index + 8, index + 10)).decode_u16(0) 
-		#var flags2 = bytes(brush_bytes, range(index + 10, index + 12)).decode_u16(0) 
+		
+		if QBSPi3:
+			first_brush_side = bytes(brush_bytes, range(index + 0, index + 4)).decode_s32(0) # Quake 3 moved to s32 for everything by the looks of it, accounting for it here
+			num_brush_side = bytes(brush_bytes, range(index + 4, index + 8)).decode_s32(0)
+			flags = bytes(brush_bytes, range(index + 8, index + 12)).decode_s32(0) # seems to be responsible for texture path in quake 3.
+			#prints("brush flags:", flags, textures["lumps"][flags].texture_path)
+		
 		
 		brush.first_brush_side = first_brush_side
 		brush.num_brush_side = num_brush_side
@@ -1985,13 +2014,17 @@ func get_brush_sides(brush_side_bytes : PackedByteArray):
 	var count = brush_side_bytes.size() / 4
 	print("QBSPi2 Calculated Estimate of %s Brush Sides" % count)
 	var brush_sides = []
-	for index in range(0, brush_side_bytes.size(), 4):
+	for index in range(0, brush_side_bytes.size(), 8 if QBSPi3 else 4):
 		
 		var plane_index = bytes(brush_side_bytes, range(index + 0, index + 2)).decode_u16(0)
 		var texture_information = bytes(brush_side_bytes, range(index + 2, index + 4)).decode_s16(0)
 		
-		var brush_side = BSPBrushSide.new()
+		if QBSPi3:
+			plane_index = bytes(brush_side_bytes, range(index + 0, index + 4)).decode_u32(0)
+			texture_information = bytes(brush_side_bytes, range(index + 4, index + 8)).decode_s32(0)
+			
 		
+		var brush_side = BSPBrushSide.new()
 		
 		brush_side.plane_index = plane_index
 		brush_side.texture_information = texture_information
@@ -2277,8 +2310,13 @@ func create_collisions():
 			var brush_planes : Array[Plane] = []
 			brush = brush as BSPBrush
 			var brush_side_range = range(brush.first_brush_side, (brush.first_brush_side + brush.num_brush_side))
+			var q3_compliant : bool = false
 			
-			if brush.flags == 1:
+			if QBSPi3:
+				var file_name = str(textures.lumps[brush.flags].texture_path).get_file()
+				q3_compliant = !(file_name.contains("hint"))
+			
+			if (QBSPi2 && brush.flags == 1) or q3_compliant:
 				for brush_side_index in brush_side_range:
 					var brush_side = geometry["brush_side"][brush_side_index]
 					var plane = geometry["plane"][brush_side.plane_index] as BSPPlane
