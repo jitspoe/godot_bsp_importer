@@ -123,6 +123,7 @@ class BSPTexture:
 	var material : Material
 	var is_warp := false
 	var is_transparent := false
+	var texture_data_offset : int
 
 	static func get_data_size() -> int:
 		return 40 # 16 + 4 * 6
@@ -139,14 +140,14 @@ class BSPTexture:
 			is_transparent = true
 		width = file.get_32()
 		height = file.get_32()
-		var texture_data_offset := BSPReader.unsigned32_to_signed(file.get_32())
+		texture_data_offset = BSPReader.unsigned32_to_signed(file.get_32())
 		if (texture_data_offset > 0):
 			texture_data_offset += texture_header_file_offset
 		file.get_32() # for mip levels
 		file.get_32() # for mip levels
 		file.get_32() # for mip levels
 		name = name.to_lower()
-		var current_file_offset = file.get_position()
+		#current_file_offset = file.get_position()
 		print("texture: ", name, " width: ", width, " height: ", height)
 		if (name != &"skip" && name != &"trigger" && name != &"waterskip" && name != &"slimeskip" && name != &"clip"):
 			var material_info := reader.load_or_create_material(name, self)
@@ -1426,7 +1427,7 @@ func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null)
 	var material : Material = null
 	if (bsp_texture):
 		width = bsp_texture.width
-		height = bsp_texture.heightload_or_create_material
+		height = bsp_texture.height
 	var material_path : String
 	if (texture_material_rename.has(name)):
 		material_path = texture_material_rename[name]
@@ -1535,7 +1536,7 @@ func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null)
 						image_emission.generate_mipmaps()
 					texture = ImageTexture.create_from_image(image)
 					need_to_save_image = true
-					file.seek(bsp_texture.current_file_offset) # Go back to where we were, in case that matters for reading the next texture.
+					#file.seek(bsp_texture.current_file_offset) # Go back to where we were, in case that matters for reading the next texture.
 				else:
 					print("No texture data in BSP file.")
 		if (texture && generate_texture_materials):
@@ -1767,8 +1768,8 @@ var QBSPi2 = false
 ## Central Function
 func convert_to_mesh(file, table : PackedStringArray = Q2_TABLE):
 	var bsp_bytes : PackedByteArray = FileAccess.get_file_as_bytes(file)
-	var bsp_version = str(convert_from_uint32(bytes(bsp_bytes, range(4, 8))))
-	var magic_num = bytes(bsp_bytes, range(0, 4)).get_string_from_utf8()
+	var bsp_version = str(convert_from_uint32(bsp_bytes.slice(4, 8)))
+	var magic_num = bsp_bytes.slice(0, 4).get_string_from_utf8()
 	QBSPi2 = bsp_version == "38"
 	
 	prints("QBSPi2 Found BSP Version %s %s" % [magic_num, bsp_version])
@@ -2501,8 +2502,9 @@ func convert_from_uint32(uint32 : PackedByteArray):
 
 
 ## returns bytes, indices should be an array e.g. [1, 2, 3, 4]
-func bytes(input_array, indices : Array) -> PackedByteArray:
-	var output_array = []
-	for index in indices:
-		output_array.append(input_array[index])
-	return output_array
+# TODO: Unoptimal, use slice() directly instead.
+func bytes(input_array : PackedByteArray, indices : Array) -> PackedByteArray:
+	if (indices.size() > 0):
+		return input_array.slice(indices[0], indices[indices.size() - 1] + 1)
+	else:
+		return []
