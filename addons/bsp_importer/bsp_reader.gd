@@ -81,8 +81,8 @@ func read_model_data_q1_bsp(model_data : BSPModelData):
 	model_data.bound_min = Vector3(min(mins.x, maxs.x), min(mins.y, maxs.y), min(mins.z, maxs.z))
 	model_data.bound_max = Vector3(max(mins.x, maxs.x), max(mins.y, maxs.y), max(mins.z, maxs.z))
 	# Not sure why, but it seems the mins/maxs are 1 unit inside of the actual mins/maxs, so increase bounds by 1 unit:
-	model_data.bound_min -= Vector3(_unit_scale, _unit_scale, _unit_scale)
-	model_data.bound_max += Vector3(_unit_scale, _unit_scale, _unit_scale)
+	model_data.bound_min -= Vector3(unit_scale, unit_scale, unit_scale)
+	model_data.bound_max += Vector3(unit_scale, unit_scale, unit_scale)
 	model_data.origin = read_vector_convert_scaled()
 	model_data.node_id0 = file.get_32()
 	model_data.node_id1 = file.get_32()
@@ -273,7 +273,7 @@ static func read_vector_convert_unscaled(file : FileAccess) -> Vector3:
 
 
 func read_vector_convert_scaled() -> Vector3:
-	return convert_vector_from_quake_scaled(Vector3(file.get_float(), file.get_float(), file.get_float()), _unit_scale)
+	return convert_vector_from_quake_scaled(Vector3(file.get_float(), file.get_float(), file.get_float()), unit_scale)
 
 
 var error := ERR_UNCONFIGURED
@@ -304,7 +304,7 @@ var plane_normals : PackedVector3Array
 var plane_distances : PackedFloat32Array
 var model_scenes : Dictionary = {}
 var is_bsp2 := false
-var _unit_scale : float = 1.0
+var unit_scale : float = 1.0 / 32.0
 var import_lights := true
 var light_brightness_scale := 16.0
 var generate_occlusion_culling := true
@@ -323,10 +323,6 @@ var bspx_model_to_brush_map := {}
 var fullbright_range : PackedInt32Array = [224, 255]
 var ignored_flags : PackedInt64Array = []
 
-var inverse_scale_fac : float = 32.0:
-	set(v):
-		inverse_scale_fac = v
-		_unit_scale = 1.0 / v
 
 # used for reading wads for goldsource games.
 var is_gsrc : bool = false 
@@ -546,7 +542,7 @@ func read_bsp(source_file : String) -> Node:
 					for plane_index in num_bspx_planes:
 						var normal := read_vector_convert_unscaled(file)
 						bytes_read += 3 * 4
-						var dist := file.get_float() * _unit_scale
+						var dist := file.get_float() * unit_scale
 						bytes_read += 4
 						var plane := Plane(normal, dist)
 						bspx_brush.planes.append(plane)
@@ -564,7 +560,7 @@ func read_bsp(source_file : String) -> Node:
 	var vertex_count := verts_size / (4 * 3)
 	verts.resize(vertex_count)
 	for i in vertex_count:
-		verts[i] = convert_vector_from_quake_scaled(Vector3(file.get_float(), file.get_float(), file.get_float()), _unit_scale)
+		verts[i] = convert_vector_from_quake_scaled(Vector3(file.get_float(), file.get_float(), file.get_float()), unit_scale)
 
 	# Read entity data
 	file.seek(entity_offset)
@@ -605,7 +601,7 @@ func read_bsp(source_file : String) -> Node:
 	for i in num_planes:
 		var quake_plane_normal := Vector3(file.get_float(), file.get_float(), file.get_float())
 		plane_normals[i] = convert_vector_from_quake_unscaled(quake_plane_normal)
-		plane_distances[i] = file.get_float() * _unit_scale
+		plane_distances[i] = file.get_float() * unit_scale
 		var _type = file.get_32() # 0 = X-Axial plane, 1 = Y-axial pane, 2 = z-axial plane, 3 nonaxial, toward x, 4 y, 5 z
 		#print("Quake plane ", i, ": ", quake_plane_normal, " dist: ", plane_distances[i], " type: ", _type)
 	#print("plane_normals: ", plane_normals)
@@ -746,8 +742,8 @@ func read_bsp(source_file : String) -> Node:
 				#print("width: ", tex_width, " height: ", tex_height)
 				var face_uvs : PackedVector2Array
 				face_uvs.resize(bsp_face.num_edges)
-				var tex_scale_x := 1.0 / (_unit_scale * tex_width)
-				var tex_scale_y := 1.0 / (_unit_scale * tex_height)
+				var tex_scale_x := 1.0 / (unit_scale * tex_width)
+				var tex_scale_y := 1.0 / (unit_scale * tex_height)
 				#print("normal: ", face_normal)
 				var face_position := Vector3.ZERO
 				for edge_list_index in range(edge_list_index_start, edge_list_index_start + bsp_face.num_edges):
@@ -895,7 +891,7 @@ func read_bsp(source_file : String) -> Node:
 						print("Shadow mesh: ", shadow_mesh.get_surface_count())
 					
 					if (generate_lightmap_uv2):
-						var err = mesh_instance.mesh.lightmap_unwrap(mesh_instance.global_transform, _unit_scale * 4.0)
+						var err = mesh_instance.mesh.lightmap_unwrap(mesh_instance.global_transform, unit_scale * 4.0)
 						#print("Lightmap unwrap result: ", err)
 
 				if (use_triangle_collision):
@@ -1112,8 +1108,8 @@ func add_generic_entity(scene_node : Node, ent_dict : Dictionary):
 	var origin := Vector3.ZERO
 	if (ent_dict.has("origin")):
 		var origin_string : String = ent_dict["origin"]
-		origin = string_to_origin(origin_string, _unit_scale)
-	var offset : Vector3 = convert_vector_from_quake_scaled(entity_offsets_quake_units.get(ent_dict["classname"], Vector3.ZERO), _unit_scale)
+		origin = string_to_origin(origin_string, unit_scale)
+	var offset : Vector3 = convert_vector_from_quake_scaled(entity_offsets_quake_units.get(ent_dict["classname"], Vector3.ZERO), unit_scale)
 	origin += offset
 	var mangle_string : String = ent_dict.get("mangle", "")
 	var angle_string : String = ent_dict.get("angle", "")
@@ -1151,7 +1147,7 @@ func add_light_entity(ent_dict : Dictionary):
 		light_color = string_to_color(ent_dict[_COLOR_STRING_NAME])
 	if (ent_dict.has(COLOR_STRING_NAME)):
 		light_color = string_to_color(ent_dict[COLOR_STRING_NAME])
-	light_node.omni_range = light_value * _unit_scale
+	light_node.omni_range = light_value * unit_scale
 	light_node.light_energy = light_value * light_brightness_scale / 255.0
 	light_node.light_color = light_color
 	light_node.shadow_enabled = true # Might want to have an option to shut this off for some lights?
@@ -2144,7 +2140,7 @@ func get_verts(vert_bytes : PackedByteArray) -> PackedVector3Array:
 			var ybytes = bytes(vert_bytes, range( (v * 12) + 4, (v * 12) + 8 )).decode_float(0)
 			var zbytes = bytes(vert_bytes, range( (v * 12) + 8, (v * 12) + 12 )).decode_float(0)
 			
-			var vec = convert_vector_from_quake_scaled(Vector3(xbytes, ybytes, zbytes), inverse_scale_fac*_unit_scale)
+			var vec = convert_vector_from_quake_unscaled(Vector3(xbytes, ybytes, zbytes))
 			vertex_array.append(vec)
 			v += 1
 	return vertex_array
@@ -2382,7 +2378,7 @@ func create_collisions():
 					var brush_side = geometry["brush_side"][brush_side_index]
 					var plane = geometry["plane"][brush_side.plane_index] as BSPPlane
 					
-					var plane_vec = Plane(plane.normal, plane.distance / inverse_scale_fac)
+					var plane_vec = Plane(plane.normal, plane.distance * unit_scale)
 					
 					brush_planes.append(plane_vec)
 				
@@ -2455,13 +2451,13 @@ func create_mesh(face_data : Array[BSPFace]) -> Mesh:
 					surface_tool.set_normal(face.face_normal)
 					surface_tool.set_uv(uv0)
 					surface_tool.set_uv2(lm_uv0)
-					surface_tool.add_vertex(v0 / inverse_scale_fac)
+					surface_tool.add_vertex(v0 * unit_scale)
 					surface_tool.set_uv(uv1)
 					surface_tool.set_uv2(lm_uv1)
-					surface_tool.add_vertex(v1 / inverse_scale_fac)
+					surface_tool.add_vertex(v1 * unit_scale)
 					surface_tool.set_uv(uv2)
 					surface_tool.set_uv2(lm_uv2)
-					surface_tool.add_vertex(v2 / inverse_scale_fac)
+					surface_tool.add_vertex(v2 * unit_scale)
 				
 	if QBSPi2:
 		for texture in texture_list:
@@ -2502,11 +2498,11 @@ func create_mesh(face_data : Array[BSPFace]) -> Mesh:
 						surface_tool.set_material(material)
 						surface_tool.set_normal(normal.normalized())
 						surface_tool.set_uv(uv0)
-						surface_tool.add_vertex(v0 / inverse_scale_fac)
+						surface_tool.add_vertex(v0 * unit_scale)
 						surface_tool.set_uv(uv1)
-						surface_tool.add_vertex(v1 / inverse_scale_fac)
+						surface_tool.add_vertex(v1 * unit_scale)
 						surface_tool.set_uv(uv2)
-						surface_tool.add_vertex(v2 / inverse_scale_fac)
+						surface_tool.add_vertex(v2 * unit_scale)
 
 	for tool in surface_list.values():
 		tool = tool as SurfaceTool

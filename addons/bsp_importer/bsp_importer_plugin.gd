@@ -69,7 +69,7 @@ func _get_import_options(path : String, preset_index : int):
 					# If it has a preset, it's a newer import file.  If not, convert the data into a preset
 					if (!import_config.has_section_key("params", "preset")):
 						bsp_preset = BSPImportPreset.new()
-						bsp_preset.inverse_scale_factor = import_config.get_value("params", "inverse_scale_factor", 32.0)
+						bsp_preset.unit_scale = 1.0 / import_config.get_value("params", "inverse_scale_factor", 32.0)
 						bsp_preset.ignored_flags = import_config.get_value("params", "ignored_flags", PackedInt64Array())
 						bsp_preset.generate_texture_materials = import_config.get_value("params", "generate_texture_materials", true)
 						bsp_preset.save_separate_materials = import_config.get_value("params", "save_separate_materials", true)
@@ -263,7 +263,7 @@ func _import(source_file : String, save_path : String, options : Dictionary, r_p
 				preset = options.get("preset", null)
 			if (preset):
 				print("Importing BSP from preset.")
-				bsp_reader.inverse_scale_fac = preset.inverse_scale_factor
+				bsp_reader.unit_scale = 1.0 / preset.inverse_scale_factor
 				bsp_reader.ignored_flags = preset.ignored_flags
 				bsp_reader.generate_texture_materials = preset.generate_texture_materials
 				bsp_reader.save_separate_materials = preset.save_separate_materials
@@ -294,7 +294,7 @@ func _import(source_file : String, save_path : String, options : Dictionary, r_p
 				bsp_reader.post_import_script_path = preset.post_import_script
 			else:
 				print("Importing BSP from import settings.")
-				bsp_reader.inverse_scale_fac = options.inverse_scale_factor
+				bsp_reader.unit_scale = 1.0 / options.inverse_scale_factor
 				bsp_reader.ignored_flags = options.ignored_flags
 				bsp_reader.generate_texture_materials = options.generate_texture_materials
 				bsp_reader.save_separate_materials = options.save_separate_materials
