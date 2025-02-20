@@ -362,7 +362,7 @@ func read_bsp(source_file : String) -> Node:
 	print("Material path pattern: ", material_path_pattern)
 	file = FileAccess.open(source_file, FileAccess.READ)
 	
-	if !ignored_flags == PackedInt64Array([]): push_warning("Ignored Flags seems to have a value, this array's usage is only integrated for Quake 2 at the moment.")
+	if !ignored_flags == PackedInt64Array([]): push_warning("Ignored Flags seems to have a value, this array's usage is only integrated for Quake 2/3 at the moment.")
 	
 	if (!file):
 		error = FileAccess.get_open_error()
@@ -379,9 +379,10 @@ func read_bsp(source_file : String) -> Node:
 	var has_clipnodes := true
 	var has_brush_table := false
 	var bsp_version := file.get_32()
+	
 	var index_bits_32 := false
-	print("BSP version: %d\n" % bsp_version)
-
+	print("BSP version: %d\n" % bsp_version, " ")
+	
 	if (bsp_version == 1347633737): # "IBSP" - Quake 2 BSP format, this also creates for Quake 3.
 		var bsp_q2_texts = [
 			"Moving File %s to QBSPi2" % source_file.get_file().get_basename(),
@@ -399,7 +400,7 @@ func read_bsp(source_file : String) -> Node:
 		has_clipnodes = false
 		has_brush_table = true
 		bsp_version = file.get_32()
-
+		
 		print("BSP sub-version: %d\n" % bsp_version)
 		file.close()
 		file = null
@@ -1849,7 +1850,7 @@ func origin_to_vec(origin : String) -> Vector3:
 
 
 func get_lightmap_lump(data : PackedByteArray) -> Image:
-	var texture : Image = Image.create(0, 0, false, Image.FORMAT_RGB8)
+	var texture : Image = Image.create(1, 1, false, Image.FORMAT_RGB8)
 	if QBSPi3:
 		var count = data.size() / 49152
 		texture = Image.create(128 * count + 128, 128, false, Image.FORMAT_RGB8)
@@ -1963,7 +1964,7 @@ func get_planes(plane_bytes : PackedByteArray) -> Array[BSPPlane]:
 			var distance = bytes(plane_bytes, range(index + 12, index + 16)).decode_float(0)
 			
 			var plane = BSPPlane.new()
-			plane.normal = Vector3(-norm_y, norm_z, -norm_x)
+			plane.normal = convert_vector_from_quake_scaled(Vector3(norm_x, norm_y, norm_z),1)
 			plane.distance = distance
 			
 			planes.append(plane)
@@ -2067,7 +2068,7 @@ func get_verts(vert_bytes : PackedByteArray) -> PackedVector3Array:
 			var xbytes = bytes(vert_bytes, range( index + 0, index + 4 )).decode_float(0)
 			var ybytes = bytes(vert_bytes, range( index + 4, index + 8 )).decode_float(0)
 			var zbytes = bytes(vert_bytes, range( index + 8, index + 12 )).decode_float(0)
-			var vertex_vec = Vector3(-ybytes, zbytes, -xbytes)
+			var vertex_vec = convert_vector_from_quake_scaled(Vector3(xbytes, ybytes, zbytes), 1)
 			
 			var u1 = (bytes(vert_bytes, range( index + 12, index + 16 )).decode_float(0))
 			var v1 = (bytes(vert_bytes, range( index + 16, index + 20 )).decode_float(0))
@@ -2077,7 +2078,7 @@ func get_verts(vert_bytes : PackedByteArray) -> PackedVector3Array:
 			var nx = bytes(vert_bytes, range( index + 28, index + 32 )).decode_float(0)
 			var ny = bytes(vert_bytes, range( index + 32, index + 36)).decode_float(0)
 			var nz = bytes(vert_bytes, range( index + 36, index + 40)).decode_float(0)
-			var normal_vec = Vector3(-ybytes, zbytes, -xbytes)
+			var normal_vec = convert_vector_from_quake_unscaled(Vector3(xbytes, ybytes, zbytes))
 			
 			var CR = bytes(vert_bytes, range( index + 40, index + 41)).decode_u8(0)
 			var CG = bytes(vert_bytes, range( index + 41, index + 42)).decode_u8(0)
@@ -2110,7 +2111,7 @@ func get_verts(vert_bytes : PackedByteArray) -> PackedVector3Array:
 			var ybytes = bytes(vert_bytes, range( (v * 12) + 4, (v * 12) + 8 )).decode_float(0)
 			var zbytes = bytes(vert_bytes, range( (v * 12) + 8, (v * 12) + 12 )).decode_float(0)
 			
-			var vec = Vector3(-ybytes, zbytes, -xbytes)
+			var vec = convert_vector_from_quake_scaled(Vector3(xbytes, ybytes, zbytes), inverse_scale_fac*_unit_scale)
 			vertex_array.append(vec)
 			v += 1
 	return vertex_array
@@ -2340,14 +2341,15 @@ func create_collisions():
 			
 			if QBSPi3:
 				var file_name = str(textures.lumps[brush.flags].texture_path).get_file()
-				q3_compliant = !(file_name.contains("hint"))
+				q3_compliant = !ignored_flags.has(brush.flags)
+				
 			
 			if (QBSPi2 && brush.flags == 1) or q3_compliant:
 				for brush_side_index in brush_side_range:
 					var brush_side = geometry["brush_side"][brush_side_index]
 					var plane = geometry["plane"][brush_side.plane_index] as BSPPlane
 					
-					var plane_vec = Plane(plane.normal, plane.distance / 32.0)
+					var plane_vec = Plane(plane.normal, plane.distance / inverse_scale_fac)
 					
 					brush_planes.append(plane_vec)
 				
@@ -2391,7 +2393,7 @@ func create_mesh(face_data : Array[BSPFace]) -> Mesh:
 		
 		for face in face_data:
 			var texture : BSPTextureInfo = texture_list[face.texinfo_id]
-			if surface_list.has(texture.texture_path):
+			if surface_list.has(texture.texture_path) and !ignored_flags.has(texture.flags):
 				var surface_tool : SurfaceTool = surface_list.get(texture.texture_path)
 				var material_info : MaterialInfo = material_info_lookup.get(surface_tool, null)
 				if (!material_info):
@@ -2420,13 +2422,13 @@ func create_mesh(face_data : Array[BSPFace]) -> Mesh:
 					surface_tool.set_normal(face.face_normal)
 					surface_tool.set_uv(uv0)
 					surface_tool.set_uv2(lm_uv0)
-					surface_tool.add_vertex(v0 / 32.0)
+					surface_tool.add_vertex(v0 / inverse_scale_fac)
 					surface_tool.set_uv(uv1)
 					surface_tool.set_uv2(lm_uv1)
-					surface_tool.add_vertex(v1 / 32.0)
+					surface_tool.add_vertex(v1 / inverse_scale_fac)
 					surface_tool.set_uv(uv2)
 					surface_tool.set_uv2(lm_uv2)
-					surface_tool.add_vertex(v2 / 32.0)
+					surface_tool.add_vertex(v2 / inverse_scale_fac)
 				
 	if QBSPi2:
 		for texture in texture_list:
@@ -2467,11 +2469,11 @@ func create_mesh(face_data : Array[BSPFace]) -> Mesh:
 						surface_tool.set_material(material)
 						surface_tool.set_normal(normal.normalized())
 						surface_tool.set_uv(uv0)
-						surface_tool.add_vertex(v0 / 32.0)
+						surface_tool.add_vertex(v0 / inverse_scale_fac)
 						surface_tool.set_uv(uv1)
-						surface_tool.add_vertex(v1 / 32.0)
+						surface_tool.add_vertex(v1 / inverse_scale_fac)
 						surface_tool.set_uv(uv2)
-						surface_tool.add_vertex(v2 / 32.0)
+						surface_tool.add_vertex(v2 / inverse_scale_fac)
 
 	for tool in surface_list.values():
 		tool = tool as SurfaceTool
