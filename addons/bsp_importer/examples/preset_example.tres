@@ -9,6 +9,7 @@
 [resource]
 script = ExtResource("3_3jh6d")
 inverse_scale_factor = 32.0
+ignored_flags = []
 generate_texture_materials = true
 material_path_pattern = "res://materials/{texture_name}_material.tres"
 texture_material_rename = {

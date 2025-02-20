@@ -44,6 +44,8 @@ class_name BSPImportPreset
 @export var entity_offsets_quake_units := { &"example_offset_entity_classname" : Vector3(16, 16, 0) }
 ## If true, light entities will import as omnilights.
 @export var import_lights := true
+## Light Brightness Scale
+@export var light_brightness_scale := 16.0
 ## If true, will generate an occlusion mesh from the worldspawn to help cull out lights and objects behind walls.
 @export var generate_occlusion_culling := true
 ## List of textures to exclude from the occlusion culling mesh.  Anything with transparency (grates, fences, etc) should be added here.

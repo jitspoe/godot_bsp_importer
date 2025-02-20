@@ -1480,9 +1480,9 @@ func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null)
 		for wad in wad_paths:
 			var n = name.to_lower()
 			if wad.resources.has(n):
-				texture = wad.load_texture(wad.resources.get(n))
-			
-		
+				var struct = wad.resources.get(n)
+				texture = wad.load_texture(struct, texture_path_pattern.replace("{texture_name}", struct.get("name")), true)
+	
 	
 	var image_emission_path : String
 	image_emission_path = texture_emission_path_pattern.replace("{texture_name}", name)
