@@ -71,8 +71,6 @@ func read_directory(file_name : String) -> Dictionary:
 		"name": f_nam, 
 		"file_name": file_name.get_file().to_lower().replace(".wad", "")
 		}
-		var fn = "!@#$%^&*()+{}|<>?:;',./[]" + "\\"[0]
-		for f in fn: f_nam = f_nam.replace(fn, "")
 		
 		if not resources.has(f_nam.to_lower()):
 			resources[f_nam.to_lower()] = directory[entry_index]
@@ -132,5 +130,6 @@ func load_texture(entry : Dictionary, save_path : String, save_to_file := false)
 			var o = offset + mm_o + (y * texture_size.x + x)
 			img.set_pixel(x, y, palette[data.slice(o, o+1).decode_u8(0)])
 	
-	if save_to_file: img.save_png(save_path + texture_string + ".png")
+	if save_to_file: 
+		img.save_png(save_path.to_lower())
 	return ImageTexture.create_from_image(img)
