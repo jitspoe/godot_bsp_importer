@@ -328,6 +328,9 @@ var inverse_scale_fac : float = 32.0:
 		inverse_scale_fac = v
 		_unit_scale = 1.0 / v
 
+# used for reading wads for goldsource games.
+var is_gsrc : bool = false 
+var wad_paths : Array[WADReader] = []
 
 func clear_data():
 	error = ERR_UNCONFIGURED
@@ -343,6 +346,7 @@ func clear_data():
 	plane_normals = []
 	plane_distances = []
 	model_scenes = {}
+	wad_paths.clear()
 
 # To find the end of a block of l
 static func get_lumps_end(current_end : int, offset : int, length : int) -> int:
@@ -356,13 +360,15 @@ class BSPXBrush:
 	var planes : Array[Plane]
 
 
+
 func read_bsp(source_file : String) -> Node:
+	
 	clear_data() # Probably not necessary, but just in case somebody reads a bsp file with the same instance
 	print("Attempting to import %s" % source_file)
 	print("Material path pattern: ", material_path_pattern)
 	file = FileAccess.open(source_file, FileAccess.READ)
 	
-	if !ignored_flags == PackedInt64Array([]): push_warning("Ignored Flags seems to have a value, this array's usage is only integrated for Quake 2/3 at the moment.")
+	if !(ignored_flags == PackedInt64Array([])): push_warning("Ignored Flags seems to have a value, this array's usage is only integrated for Quake 2/3 at the moment.")
 	
 	if (!file):
 		error = FileAccess.get_open_error()
@@ -382,6 +388,10 @@ func read_bsp(source_file : String) -> Node:
 	
 	var index_bits_32 := false
 	print("BSP version: %d\n" % bsp_version, " ")
+	is_gsrc = (bsp_version == 30) # check if its goldsrc so it doesn't try to look for textures in WADs for non-goldsrc formats.
+	if is_gsrc:
+		create_wad_table()
+		prints("WADs located.")
 	
 	if (bsp_version == 1347633737): # "IBSP" - Quake 2 BSP format, this also creates for Quake 3.
 		var bsp_q2_texts = [
@@ -414,6 +424,7 @@ func read_bsp(source_file : String) -> Node:
 		print("BSP2 extended Quake format.")
 		is_bsp2 = true
 		index_bits_32 = true
+	
 	var entity_offset := file.get_32()
 	var entity_size := file.get_32()
 	# Need to figure out the end of the vanilla BSP data so that we can get the BSPX data.
@@ -1420,6 +1431,16 @@ func convert_planes_to_points(convex_planes : Array[Plane]) -> PackedVector3Arra
 #
 #	return clipper.vertices
 
+func create_wad_table():
+	var wad_path = texture_path_pattern.replace("{texture_name}.png",  "wad/")
+	if not DirAccess.dir_exists_absolute(wad_path): DirAccess.make_dir_recursive_absolute(wad_path)
+	var files_in_dir = DirAccess.get_files_at(wad_path)
+	
+	for file in files_in_dir:
+		if file.get_extension() == "wad":
+			var w : WADReader = load(wad_path + file).instantiate()
+			wad_paths.append(w)
+			prints("loading", w)
 
 # BSPTexture is optional, for handling Q1 BSP files that have textures embedded.
 func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null) -> MaterialInfo:
@@ -1443,6 +1464,7 @@ func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null)
 	else:
 		image_path = texture_path_pattern.replace("{texture_name}", name)
 	var original_image_path := image_path
+	
 	if (!ResourceLoader.exists(image_path)):
 		image_path = str(image_path.get_basename(), ".jpg") # Jpeg fallback
 	if (!ResourceLoader.exists(image_path)):
@@ -1453,8 +1475,19 @@ func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null)
 			width = texture.get_width()
 			height = texture.get_height()
 			print(name, ": External image width: ", width, " height: ", height)
-	else:
+	elif (!ResourceLoader.exists(image_path) && !is_gsrc):
 		print("Could not load ", original_image_path)
+	
+	# finally, check for if it is goldsrc to read the wad.
+	# this code is pretty sucky wucky :-( probably better for memory management
+	if (!ResourceLoader.exists(image_path) && is_gsrc):
+		for wad in wad_paths:
+			var n = name.to_lower()
+			if wad.resources.has(n):
+				texture = wad.load_texture(wad.resources.get(n))
+			
+		
+	
 	var image_emission_path : String
 	image_emission_path = texture_emission_path_pattern.replace("{texture_name}", name)
 	if (ResourceLoader.exists(image_emission_path)):
