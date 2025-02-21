@@ -198,6 +198,10 @@ func _get_import_options(path : String, preset_index : int):
 							"default_value" : true
 						},
 						{
+							"name" : "light_brightness_scale",
+							"default_value" : 16.0
+						},
+						{
 							"name" : "generate_occlusion_culling",
 							"default_value" : true
 						},
@@ -284,6 +288,7 @@ func _import(source_file : String, save_path : String, options : Dictionary, r_p
 				bsp_reader.entity_remap = preset.entity_remap
 				bsp_reader.entity_offsets_quake_units = preset.entity_offsets_quake_units
 				bsp_reader.import_lights = preset.import_lights
+				bsp_reader.light_brightness_scale = preset.light_brightness_scale
 				bsp_reader.generate_occlusion_culling = preset.generate_occlusion_culling
 				bsp_reader.culling_textures_exclude = preset.culling_textures_exclude
 				#bsp_reader.generate_shadow_mesh = preset.generate_shadow_mesh # Not fully implemented, yet
@@ -315,6 +320,7 @@ func _import(source_file : String, save_path : String, options : Dictionary, r_p
 				bsp_reader.entity_remap = options.entity_remap
 				bsp_reader.entity_offsets_quake_units = options.entity_offsets_quake_units
 				bsp_reader.import_lights = options.import_lights
+				bsp_reader.light_brightness_scale = options.light_brightness_scale
 				bsp_reader.generate_occlusion_culling = options.generate_occlusion_culling
 				bsp_reader.culling_textures_exclude = options.culling_textures_exclude
 				#bsp_reader.generate_shadow_mesh = options.generate_shadow_mesh # Not fully implemented yet.

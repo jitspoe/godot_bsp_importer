@@ -71,8 +71,6 @@ func read_directory(file_name : String) -> Dictionary:
 		"name": f_nam, 
 		"file_name": file_name.get_file().to_lower().replace(".wad", "")
 		}
-		var fn = "!@#$%^&*()+{}|<>?:;',./[]" + "\\"[0]
-		for f in fn: f_nam = f_nam.replace(fn, "")
 		
 		if not resources.has(f_nam.to_lower()):
 			resources[f_nam.to_lower()] = directory[entry_index]
@@ -86,16 +84,15 @@ func create_resources():
 		
 		match entry.type:
 			67: # Miptex Image.
-				load_texture(entry, false)
+				load_texture(entry, "res://textures/", false)
 
-func load_texture(entry : Dictionary, save_to_file := false) -> ImageTexture:
+func load_texture(entry : Dictionary, save_path : String, save_to_file := false) -> ImageTexture:
 	var offset = entry.offset
 	var mti = MipTexInfo.new()
 	var texture_string = data.slice(offset + 0, offset + 16).get_string_from_ascii()
 	prints("Loading Miptexture %s for %s" % [texture_string, entry.file_name])
 	mti.texture_string = texture_string
-	if not DirAccess.dir_exists_absolute("res://wad_textures/%s/" % entry.file_name): 
-		DirAccess.make_dir_recursive_absolute("res://wad_textures/%s/" % entry.file_name)
+	
 	
 	var width = data.slice(offset + 16, offset + 20).decode_u16(0)
 	var height = data.slice(offset + 20, offset + 24).decode_u16(0)
@@ -134,5 +131,5 @@ func load_texture(entry : Dictionary, save_to_file := false) -> ImageTexture:
 			img.set_pixel(x, y, palette[data.slice(o, o+1).decode_u8(0)])
 	
 	if save_to_file: 
-		img.save_png("res://wad_textures/%s/%s.png" % [entry.file_name, texture_string])
+		img.save_png(save_path.to_lower())
 	return ImageTexture.create_from_image(img)
