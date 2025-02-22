@@ -1993,7 +1993,7 @@ func get_planes(plane_bytes : PackedByteArray) -> Array[BSPPlane]:
 			var distance = bytes(plane_bytes, range(index + 12, index + 16)).decode_float(0)
 			
 			var plane = BSPPlane.new()
-			plane.normal = convert_vector_from_quake_scaled(Vector3(norm_x, norm_y, norm_z),1)
+			plane.normal = convert_vector_from_quake_unscaled(Vector3(norm_x, norm_y, norm_z))
 			plane.distance = distance
 			
 			planes.append(plane)
@@ -2011,7 +2011,7 @@ func get_planes(plane_bytes : PackedByteArray) -> Array[BSPPlane]:
 			var type = bytes(plane_bytes, range(index + 16, index + 20)).decode_u32(0)
 			
 			var plane = BSPPlane.new()
-			plane.normal = Vector3(-norm_y, norm_z, -norm_x)
+			plane.normal = convert_vector_from_quake_unscaled(Vector3(norm_x, norm_y, norm_z))
 			plane.distance = distance
 			plane.type = type
 			planes.append(plane)
@@ -2097,7 +2097,7 @@ func get_verts(vert_bytes : PackedByteArray) -> PackedVector3Array:
 			var xbytes = bytes(vert_bytes, range( index + 0, index + 4 )).decode_float(0)
 			var ybytes = bytes(vert_bytes, range( index + 4, index + 8 )).decode_float(0)
 			var zbytes = bytes(vert_bytes, range( index + 8, index + 12 )).decode_float(0)
-			var vertex_vec = convert_vector_from_quake_scaled(Vector3(xbytes, ybytes, zbytes), 1)
+			var vertex_vec = convert_vector_from_quake_unscaled(Vector3(xbytes, ybytes, zbytes))
 			
 			var u1 = (bytes(vert_bytes, range( index + 12, index + 16 )).decode_float(0))
 			var v1 = (bytes(vert_bytes, range( index + 16, index + 20 )).decode_float(0))
@@ -2491,9 +2491,9 @@ func create_mesh(face_data : Array[BSPFace]) -> Mesh:
 						var uv1 = get_uv_q(v1, texture, width, height)
 						var uv2 = get_uv_q(v2, texture, width, height)
 						
-						#var plane = geometry["plane"][face.plane_id] as BSPPlane
-						var normal : Vector3 = (v1 - v0).cross((v2 - v0))#FIXME: planes dont work for quake 2 for some reason, vector calculated by cross product 
-						#var normal : Vector3 = plane.normal
+						var plane = geometry["plane"][face.plane_id] as BSPPlane
+						#var normal : Vector3 = (v1 - v0).cross((v2 - v0))#FIXME: planes dont work for quake 2 for some reason, vector calculated by cross product 
+						var normal : Vector3 = plane.normal
 						
 						surface_tool.set_material(material)
 						surface_tool.set_normal(normal.normalized())
