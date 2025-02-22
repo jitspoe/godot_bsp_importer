@@ -2492,7 +2492,7 @@ func create_mesh(face_data : Array[BSPFace]) -> Mesh:
 						var uv2 = get_uv_q(v2, texture, width, height)
 						
 						#var plane = geometry["plane"][face.plane_id] as BSPPlane
-						var normal : Vector3 = (v1 - v0).cross((v2 - v0))#FIXME: planes dont work for quake 2 for some reason, vector calculated by cross product 
+						var normal : Vector3 = (v1 - v0).cross((v0 - v2))#FIXME: planes dont work for quake 2 for some reason, vector calculated by cross product 
 						#var normal : Vector3 = plane.normal
 						
 						surface_tool.set_material(material)
