@@ -1074,7 +1074,7 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 								var dest_type := typeof(dest_value)
 								match (dest_type):
 									TYPE_BOOL:
-										value = string_value.to_int() != 0
+										value = convert_string_to_bool(string_value)
 									TYPE_INT:
 										value = string_value.to_int()
 									TYPE_FLOAT:
@@ -2530,6 +2530,18 @@ func convert_from_uint32(uint32 : PackedByteArray):
 	var uint32_value = uint32.decode_u32(0)
 	if uint32.size() < 4: return 0
 	return uint32_value
+
+
+## Non-zero values are true, as do "t" and "y" for "true" and "yes".
+static func convert_string_to_bool(string : String) -> bool:
+	if (string.length() == 0):
+		return false
+	if (string.to_int() != 0):
+		return true
+	var first_character := string[0].to_lower()
+	if (first_character == 't' || first_character == 'y'):
+		return true
+	return false
 
 
 ## returns bytes, indices should be an array e.g. [1, 2, 3, 4]
