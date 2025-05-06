@@ -1584,6 +1584,9 @@ func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null)
 			material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 			material.diffuse_mode = BaseMaterial3D.DIFFUSE_BURLEY
 			material.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
+			if (name.begins_with(transparent_texture_prefix)):
+				print("Transparency enabled.")
+				material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
 			if (save_separate_materials): # Write materials
 				print("Save separate materials.")
 				# Write texture if it wasn't in the project.
