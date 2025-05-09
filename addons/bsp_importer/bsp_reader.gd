@@ -1865,7 +1865,8 @@ func convert_to_mesh(file, table : PackedStringArray = Q2_TABLE):
 	for surface in mesh.get_surface_count():
 		arm.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, mesh.surface_get_arrays(surface))
 		arm.surface_set_material(surface, mesh.surface_get_material(surface))
-	
+	if (generate_lightmap_uv2):
+		arm.lightmap_unwrap(mi.global_transform, unit_scale * 4.0)
 	mi.mesh = arm
 	
 	return mi
