@@ -12,6 +12,10 @@ const CONTENTS_SOLID := -2
 const CONTENTS_WATER := -3
 const CONTENTS_SLIME := -4
 const CONTENTS_LAVA := -5
+const SURFACE_FLAG_SKY := 4
+const SURFACE_FLAG_NODRAW := 128
+const SURFACE_FLAG_HINT := 256
+const SURFACE_FLAG_SKIP := 512
 #define CONTENTS_SKY          -6
 #define CONTENTS_ORIGIN       -7
 #define CONTENTS_CLIP         -8
@@ -149,7 +153,7 @@ class BSPTexture:
 		name = name.to_lower()
 		#current_file_offset = file.get_position()
 		print("texture: ", name, " width: ", width, " height: ", height)
-		if (name != &"skip" && name != &"trigger" && name != &"waterskip" && name != &"slimeskip" && name != &"clip"):
+		if (name != &"skip" && name != &"trigger" && name != &"waterskip" && name != &"slimeskip" && name != &"clip" && (reader.include_sky_surfaces || !name.begins_with("sky"))):
 			var material_info := reader.load_or_create_material(name, self)
 			if (material_info):
 				material = material_info.material
@@ -322,7 +326,7 @@ var mesh_separation_grid_size := 256.0
 var bspx_model_to_brush_map := {}
 var fullbright_range : PackedInt32Array = [224, 255]
 var ignored_flags : PackedInt64Array = []
-
+var include_sky_surfaces := true
 
 # used for reading wads for goldsource games.
 var is_gsrc : bool = false 
@@ -2426,7 +2430,12 @@ func create_mesh(face_data : Array[BSPFace]) -> Mesh:
 		
 		for face in face_data:
 			var texture : BSPTextureInfo = texture_list[face.texinfo_id]
-			if surface_list.has(texture.texture_path) and !ignored_flags.has(texture.flags):
+			var ignore_surface := ignored_flags.has(texture.flags) # Can probably get rid of this once all the normal skipping flags are added
+			if (texture.flags & (SURFACE_FLAG_NODRAW | SURFACE_FLAG_HINT | SURFACE_FLAG_SKIP)):
+				ignore_surface = true
+			if (!include_sky_surfaces && (texture.flags & SURFACE_FLAG_SKY)):
+				ignore_surface = true
+			if surface_list.has(texture.texture_path) and !ignore_surface:
 				var surface_tool : SurfaceTool = surface_list.get(texture.texture_path)
 				var material_info : MaterialInfo = material_info_lookup.get(surface_tool, null)
 				if (!material_info):
@@ -2485,7 +2494,12 @@ func create_mesh(face_data : Array[BSPFace]) -> Mesh:
 				var width := material_info.width
 				var height := material_info.height
 				var verts : PackedVector3Array = face.verts
-				if not ignored_flags.has(texture.flags):
+				var ignore_surface := ignored_flags.has(texture.flags) # Can probably get rid of this once all the normal skipping flags are added
+				if (texture.flags & (SURFACE_FLAG_NODRAW | SURFACE_FLAG_HINT | SURFACE_FLAG_SKIP)):
+					ignore_surface = true
+				if (!include_sky_surfaces && (texture.flags & SURFACE_FLAG_SKY)):
+					ignore_surface = true
+				if (!ignore_surface):
 					for vertIndex in range(0, verts.size(), 3):
 						var v0 = verts[vertIndex + 0]
 						var v1 = verts[vertIndex + 1]

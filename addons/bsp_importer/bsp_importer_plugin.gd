@@ -122,6 +122,10 @@ func _get_import_options(path : String, preset_index : int):
 							"default_value" : PackedInt64Array()
 						},
 						{
+							"name" : "include_sky_surfaces",
+							"default_value" : true
+						},
+						{
 							"name" : "generate_texture_materials",
 							"default_value" : true
 						},
@@ -301,6 +305,7 @@ func _import(source_file : String, save_path : String, options : Dictionary, r_p
 				print("Importing BSP from import settings.")
 				bsp_reader.unit_scale = 1.0 / options.inverse_scale_factor
 				bsp_reader.ignored_flags = options.ignored_flags
+				bsp_reader.include_sky_surfaces = options.include_sky_surfaces
 				bsp_reader.generate_texture_materials = options.generate_texture_materials
 				bsp_reader.save_separate_materials = options.save_separate_materials
 				bsp_reader.overwrite_existing_materials = options.overwrite_existing_materials
