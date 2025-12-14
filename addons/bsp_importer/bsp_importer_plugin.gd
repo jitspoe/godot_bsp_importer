@@ -119,7 +119,7 @@ func _get_import_options(path : String, preset_index : int):
 						},
 						{
 							"name" : "ignored_flags",
-							"default_value" : PackedInt64Array()
+							"default_value" : PackedInt64Array(),
 						},
 						{
 							"name" : "include_sky_surfaces",
@@ -143,27 +143,33 @@ func _get_import_options(path : String, preset_index : int):
 						},
 						{
 							"name" : "texture_material_rename",
-							"default_value" : { "texture_name1_example" : "res://material/texture_name1_material.tres" }
+							"default_value" : { "texture_name1_example" : "res://material/texture_name1_material.tres" },
+							"property_hint" : PROPERTY_HINT_DICTIONARY_TYPE,
+							"hint_string" : "StringName;PackedScene"
 						},
 						{
 							"name" : "texture_path_pattern",
-							"default_value" : "res://textures/{texture_name}.png"
+							"default_value" : "res://textures/{texture_name}.png",
 						},
 						{
 							"name" : "texture_emission_path_pattern",
-							"default_value" : "res://textures/{texture_name}_emission.png"
+							"default_value" : "res://textures/{texture_name}_emission.png",
 						},
 						{
 							"name" : "texture_path_remap",
-							"default_value" : { "texture_name1_example" : "res://textures/texture_name1.png" }
+							"default_value" : { "texture_name1_example" : "res://textures/texture_name1.png" },
+							"property_hint" : PROPERTY_HINT_DICTIONARY_TYPE,
+							"hint_string" : "String;String",
 						},
 						{
 							"name" : "transparent_texture_prefix",
-							"default_value" : "{"
+							"default_value" : "{",
 						},
 						{
 							"name" : "texture_palette_path",
-							"default_value" : "res://textures/palette.lmp"
+							"default_value" : "res://textures/palette.lmp",
+							"property_hint" : PROPERTY_HINT_FILE_PATH,
+							"hint_string" : "*.lmp",
 						},
 						{
 							"name" : "fullbright_range",
@@ -175,15 +181,21 @@ func _get_import_options(path : String, preset_index : int):
 						},
 						{
 							"name" : "water_scene_template",
-							"default_value" : "res://addons/bsp_importer/examples/water_example_template.tscn"
+							"default_value" : "res://addons/bsp_importer/examples/water_example_template.tscn",
+							"property_hint" : PROPERTY_HINT_FILE_PATH,
+							"hint_string" : "*.tscn",
 						},
 						{
 							"name" : "slime_scene_template",
-							"default_value" : "res://addons/bsp_importer/examples/slime_example_template.tscn"
+							"default_value" : "res://addons/bsp_importer/examples/slime_example_template.tscn",
+							"property_hint" : PROPERTY_HINT_FILE_PATH,
+							"hint_string" : "*.tscn",
 						},
 						{
 							"name" : "lava_scene_template",
-							"default_value" : "res://addons/bsp_importer/examples/lava_example_template.tscn"
+							"default_value" : "res://addons/bsp_importer/examples/lava_example_template.tscn",
+							"property_hint" : PROPERTY_HINT_FILE_PATH,
+							"hint_string" : "*.tscn",
 						},
 						{
 							"name" : "entity_path_pattern",
@@ -191,11 +203,15 @@ func _get_import_options(path : String, preset_index : int):
 						},
 						{
 							"name" : "entity_remap",
-							"default_value" : { &"trigger_example" : "res://triggers/trigger_example.tres" }
+							"default_value" : {&"trigger_example" : "res://triggers/trigger_example.tscn"},
+							"property_hint" : PROPERTY_HINT_DICTIONARY_TYPE,
+							"hint_string" : "StringName;%d/%d:PackedScene" % [TYPE_OBJECT, PROPERTY_HINT_RESOURCE_TYPE],
 						},
 						{
 							"name" : "entity_offsets_quake_units",
-							"default_value" : { &"example_offset_entity" : Vector3(16, 16, 0) }
+							"default_value" : { &"example_offset_entity" : Vector3(16, 16, 0) },
+							"property_hint" : PROPERTY_HINT_DICTIONARY_TYPE,
+							"hint_string" : "StringName;Vector3",
 						},
 						{
 							"name" : "import_lights",
@@ -217,7 +233,9 @@ func _get_import_options(path : String, preset_index : int):
 						#},
 						{
 							"name" : "culling_textures_exclude",
-							"default_value" : [] as Array[StringName]
+							"default_value" : [] as Array[StringName],
+							"property_hint" : PROPERTY_HINT_ARRAY_TYPE,
+							"hint_string" : "%d:" % TYPE_STRING,
 						},
 						{
 							"name" : "use_triangle_collision",
@@ -237,7 +255,7 @@ func _get_import_options(path : String, preset_index : int):
 						},
 						{
 							"name" : "post_import_script",
-							"default_value" : ""
+							"default_value" : "",
 						}]
 					_:
 						return []
