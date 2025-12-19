@@ -145,7 +145,7 @@ func _get_import_options(path : String, preset_index : int):
 							"name" : "texture_material_rename",
 							"default_value" : { &"texture_name1_example" : "res://material/texture_name1_material.tres" },
 							"property_hint" : PROPERTY_HINT_DICTIONARY_TYPE,
-							"hint_string" : "StringName;%d/%d" % [TYPE_STRING, PROPERTY_HINT_FILE],
+							"hint_string" : "StringName;%d/%d:*.tres" % [TYPE_STRING, PROPERTY_HINT_FILE_PATH],
 						},
 						{
 							"name" : "texture_path_pattern",
@@ -157,7 +157,7 @@ func _get_import_options(path : String, preset_index : int):
 						},
 						{
 							"name" : "texture_path_remap",
-							"default_value" : { "texture_name1_example" : "res://textures/texture_name1.png" },
+							"default_value" : { &"texture_name1_example" : "res://textures/texture_name1.png" },
 							"property_hint" : PROPERTY_HINT_DICTIONARY_TYPE,
 							"hint_string" : "StringName;String",
 						},
@@ -205,7 +205,7 @@ func _get_import_options(path : String, preset_index : int):
 							"name" : "entity_remap",
 							"default_value" : {&"trigger_example" : "res://triggers/trigger_example.tscn"},
 							"property_hint" : PROPERTY_HINT_DICTIONARY_TYPE,
-							"hint_string" : "StringName;%d/%d:*.tscn" % [TYPE_STRING, PROPERTY_HINT_FILE],
+							"hint_string" : "StringName;%d/%d:*.tscn" % [TYPE_STRING, PROPERTY_HINT_FILE_PATH],
 						},
 						{
 							"name" : "entity_offsets_quake_units",
