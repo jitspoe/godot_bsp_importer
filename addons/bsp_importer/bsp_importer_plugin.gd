@@ -235,7 +235,7 @@ func _get_import_options(path : String, preset_index : int):
 							"name" : "culling_textures_exclude",
 							"default_value" : [] as Array[StringName],
 							"property_hint" : PROPERTY_HINT_ARRAY_TYPE,
-							"hint_string" : "%d:" % TYPE_STRING,
+							"hint_string" : "StringName",
 						},
 						{
 							"name" : "use_triangle_collision",
