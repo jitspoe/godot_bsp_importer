@@ -119,7 +119,7 @@ func _get_import_options(path : String, preset_index : int):
 						},
 						{
 							"name" : "ignored_flags",
-							"default_value" : PackedInt64Array(),
+							"default_value" : PackedInt64Array()
 						},
 						{
 							"name" : "include_sky_surfaces",
@@ -149,11 +149,11 @@ func _get_import_options(path : String, preset_index : int):
 						},
 						{
 							"name" : "texture_path_pattern",
-							"default_value" : "res://textures/{texture_name}.png",
+							"default_value" : "res://textures/{texture_name}.png"
 						},
 						{
 							"name" : "texture_emission_path_pattern",
-							"default_value" : "res://textures/{texture_name}_emission.png",
+							"default_value" : "res://textures/{texture_name}_emission.png"
 						},
 						{
 							"name" : "texture_path_remap",
@@ -163,7 +163,7 @@ func _get_import_options(path : String, preset_index : int):
 						},
 						{
 							"name" : "transparent_texture_prefix",
-							"default_value" : "{",
+							"default_value" : "{"
 						},
 						{
 							"name" : "texture_palette_path",
@@ -255,7 +255,7 @@ func _get_import_options(path : String, preset_index : int):
 						},
 						{
 							"name" : "post_import_script",
-							"default_value" : "",
+							"default_value" : ""
 						}]
 					_:
 						return []
