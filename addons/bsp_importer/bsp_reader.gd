@@ -1122,6 +1122,7 @@ func add_generic_entity(scene_node : Node, ent_dict : Dictionary):
 	var mangle_string : String = ent_dict.get("mangle", "")
 	var angle_string : String = ent_dict.get("angle", "")
 	var angles_string : String = ent_dict.get("angles", "")
+	var entity_name : String = ent_dict.get("name", "") # Optional name paramater
 	var basis := Basis()
 	if (angle_string.length() > 0):
 		basis = angle_string_to_basis(angle_string)
@@ -1133,6 +1134,8 @@ func add_generic_entity(scene_node : Node, ent_dict : Dictionary):
 	root_node.add_child(scene_node, true)
 	scene_node.transform = transform
 	scene_node.owner = root_node
+	if (!entity_name.is_empty()):
+		scene_node.name = entity_name
 	if (ent_dict.has("model")):
 		var model_value : String = ent_dict["model"]
 		# Models that start with a * are contained with in the BSP file (ex: doors, triggers, etc)
