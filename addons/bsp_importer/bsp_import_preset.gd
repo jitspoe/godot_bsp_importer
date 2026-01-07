@@ -39,7 +39,7 @@ class_name BSPImportPreset
 ## Entities from the BSP file will use this scene, with {classname} replaced by the the class name string.  Use the entity remap if you want to map to specific scenes with different instead.  Brush entities should have a CharacterBody3D (or some other body) as the root.  Collisions from brushes will be added as children.
 @export var entity_path_pattern := "res://entities/{classname}.tscn"
 ## Remaps an entity classname to a scene.  Brush entities should have a CharacterBody3D (or some other body) as the root.  Collisions from brushes will be added as children.
-@export var entity_remap := { &"trigger_example" : preload("res://addons/bsp_importer/examples/trigger_example.tscn") }
+@export var entity_remap : Dictionary[StringName, Variant] = { &"trigger_example" : preload("res://addons/bsp_importer/examples/trigger_example.tscn") }
 ## Some entities, such as health packs, are not centered, or you might need to offset them with this classname to vector3 offset dictionary.  Uses Quake units.
 @export var entity_offsets_quake_units := { &"example_offset_entity_classname" : Vector3(16, 16, 0) }
 ## If true, light entities will import as omnilights.
