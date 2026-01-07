@@ -502,12 +502,16 @@ func read_bsp(source_file : String) -> Node:
 		var num_bspx_entries := file.get_32()
 		for i in num_bspx_entries:
 			var entry_name := file.get_buffer(BSPX_NAME_LENGTH).get_string_from_ascii()
+			var bspx_lump_offset = file.get_32()
+			var bspx_lump_length = file.get_32()
 			print("BSPX entry: ", entry_name)
 			if (entry_name == "BRUSHLIST"):
 				print("Has BSPX brush list.")
 				has_bspx_brushes = true
-				bspx_brushes_offset = file.get_32()
-				bspx_brushes_length = file.get_32()
+				bspx_brushes_offset = bspx_lump_offset
+				bspx_brushes_length = bspx_lump_length
+			else:
+				get_lumps_end(bspx_offset, bspx_lump_offset, bspx_lump_length)
 		if (has_bspx_brushes && USE_BSPX_BRUSHES):
 			use_bspx_brushes = true
 			var bytes_read := 0
