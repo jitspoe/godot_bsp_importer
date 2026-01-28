@@ -3,6 +3,7 @@ extends Node
 class_name BSPReader
 
 const USE_BSPX_BRUSHES := true # If -wrbrushes is used, use the extra brush data for collision instead of the BSP tree collision.
+const USE_BSPX_NORMALS := true # If -wrnormals is used in ericw light.exe, vertex normals will be used from that instead of the BSP face normals.
 const TEST_BOX_ONLY_COLLISION := false # For performance testing using only boxes.
 # Documentation: https://docs.godotengine.org/en/latest/tutorials/plugins/editor/import_plugins.html
 const SINGLE_STATIC_BODY := true
@@ -348,7 +349,7 @@ func clear_data():
 	model_scenes = {}
 	wad_paths.clear()
 
-# To find the end of a block of l
+# To find the end of a block of lumps
 static func get_lumps_end(current_end : int, offset : int, length : int) -> int:
 	return max(current_end, offset + length)
 
@@ -493,12 +494,18 @@ func read_bsp(source_file : String) -> Node:
 	file.seek(bspx_offset)
 	var bspx_check := file.get_32()
 	var use_bspx_brushes := false
+	var vertex_normal_values : PackedVector3Array = []
+	var vertex_normal_indexes : PackedInt32Array = []
+	var use_vertex_normal_array := false
 	if (bspx_check == 1481659202): # "BSPX"
 		has_bspx = true
 		print("Has BSPX.")
 		var has_bspx_brushes := false
 		var bspx_brushes_offset := 0
 		var bspx_brushes_length := 0
+		var has_bspx_face_normals := false
+		var bspx_face_normals_offset := 0
+		var bspx_face_normals_length := 0
 		var num_bspx_entries := file.get_32()
 		for i in num_bspx_entries:
 			var entry_name := file.get_buffer(BSPX_NAME_LENGTH).get_string_from_ascii()
@@ -510,8 +517,10 @@ func read_bsp(source_file : String) -> Node:
 				has_bspx_brushes = true
 				bspx_brushes_offset = bspx_lump_offset
 				bspx_brushes_length = bspx_lump_length
-			else:
-				get_lumps_end(bspx_offset, bspx_lump_offset, bspx_lump_length)
+			elif (entry_name == "FACENORMALS"):
+				has_bspx_face_normals = true
+				bspx_face_normals_offset = bspx_lump_offset
+				bspx_face_normals_length = bspx_lump_length
 		if (has_bspx_brushes && USE_BSPX_BRUSHES):
 			use_bspx_brushes = true
 			var bytes_read := 0
@@ -556,6 +565,24 @@ func read_bsp(source_file : String) -> Node:
 						bspx_brush.planes.append(plane)
 					brush_array.append(bspx_brush)
 				bspx_model_to_brush_map[model_num] = brush_array
+		if (has_bspx_face_normals && USE_BSPX_NORMALS):
+			print("Using BSPX normals.")
+			use_vertex_normal_array = true
+			var read_left_to_do := bspx_face_normals_length
+			file.seek(bspx_face_normals_offset)
+			var num_unique_normals := file.get_32()
+			vertex_normal_values.resize(num_unique_normals)
+			read_left_to_do -= 4
+			read_left_to_do -= 4 * 3 * num_unique_normals
+			for i in num_unique_normals:
+				vertex_normal_values[i] = read_vector_convert_unscaled(file)
+			# Could resize the index array here as a slight optimization, maybe...
+			while (read_left_to_do > 0):
+				vertex_normal_indexes.append(file.get_32())
+				read_left_to_do -= 4
+			#print(vertex_normal_indexes)
+			#print(vertex_normal_values)
+			#print("Num vert indexes: ", vertex_normal_indexes.size())
 	else:
 		print("Does not have BSPX.")
 	
@@ -705,6 +732,7 @@ func read_bsp(source_file : String) -> Node:
 			var face_size := BSPFace.get_data_size_q1bsp() if !is_bsp2 else BSPFace.get_data_size_bsp2()
 			file.seek(faces_offset + bsp_model.face_index * face_size)
 			var num_faces := bsp_model.face_count
+			var unique_vert_index := 0
 			#print("num_faces: ", num_faces)
 			for face_index in num_faces:
 				if (is_bsp2):
@@ -755,7 +783,7 @@ func read_bsp(source_file : String) -> Node:
 				#print("normal: ", face_normal)
 				var face_position := Vector3.ZERO
 				for edge_list_index in range(edge_list_index_start, edge_list_index_start + bsp_face.num_edges):
-					var vert_index_0 : int
+					var vert_index : int
 					var reverse_order := false
 					var edge_index := edge_list[edge_list_index]
 					if (edge_index < 0):
@@ -763,13 +791,17 @@ func read_bsp(source_file : String) -> Node:
 						edge_index = -edge_index
 					
 					if (reverse_order): # Not sure which way this should be flipped to get correct tangents
-						vert_index_0 = edges[edge_index].vertex_index_1
+						vert_index = edges[edge_index].vertex_index_1
 					else:
-						vert_index_0 = edges[edge_index].vertex_index_0
-					var vert := verts[vert_index_0]
+						vert_index = edges[edge_index].vertex_index_0
+					var vert := verts[vert_index]
 					#print("vert (%s): %d, " % ["r" if reverse_order else "f", vert_index_0], vert)
 					face_verts[i] = vert
+					if (use_vertex_normal_array):
+						face_normals[i] = vertex_normal_values[vertex_normal_indexes[unique_vert_index * 3]] # Need to multiply by 3 here because the indexes store normal, tangent, binormal
+					else:
 					face_normals[i] = face_normal
+					unique_vert_index += 1
 					face_uvs[i].x = vert.dot(vs) * tex_scale_x + s / tex_width
 					face_uvs[i].y = vert.dot(vt) * tex_scale_y + t / tex_height
 					#print("vert: ", vert, " vs: ", vs, " d: ", vert.dot(vs), " vt: ", vt, " d: ", vert.dot(vt))
@@ -813,10 +845,10 @@ func read_bsp(source_file : String) -> Node:
 					parent_node.add_child(mesh_instance, true)
 					mesh_instance.transform = parent_inv_transform
 					mesh_instance.owner = root_node
-
+			#print("Unique vert count: ", unique_vert_index)
 			# Create meshes for each cell in the mesh grid.
 			for grid_index in mesh_grid:
-				var surface_tools = mesh_grid[grid_index] # Is there a way to loop through the keys instead?
+				var surface_tools : Dictionary = mesh_grid[grid_index] # Is there a way to loop through the keys instead?
 				var mesh_instance := MeshInstance3D.new()
 				var array_mesh : ArrayMesh = null
 				var array_mesh_no_cull : ArrayMesh = null
