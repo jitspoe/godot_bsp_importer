@@ -732,7 +732,6 @@ func read_bsp(source_file : String) -> Node:
 			var face_size := BSPFace.get_data_size_q1bsp() if !is_bsp2 else BSPFace.get_data_size_bsp2()
 			file.seek(faces_offset + bsp_model.face_index * face_size)
 			var num_faces := bsp_model.face_count
-			var unique_vert_index := 0
 			#print("num_faces: ", num_faces)
 			for face_index in num_faces:
 				if (is_bsp2):
@@ -798,10 +797,9 @@ func read_bsp(source_file : String) -> Node:
 					#print("vert (%s): %d, " % ["r" if reverse_order else "f", vert_index_0], vert)
 					face_verts[i] = vert
 					if (use_vertex_normal_array):
-						face_normals[i] = vertex_normal_values[vertex_normal_indexes[unique_vert_index * 3]] # Need to multiply by 3 here because the indexes store normal, tangent, binormal
+						face_normals[i] = vertex_normal_values[vertex_normal_indexes[edge_list_index * 3]] # Need to multiply by 3 here because the indexes store normal, tangent, binormal
 					else:
 					face_normals[i] = face_normal
-					unique_vert_index += 1
 					face_uvs[i].x = vert.dot(vs) * tex_scale_x + s / tex_width
 					face_uvs[i].y = vert.dot(vt) * tex_scale_y + t / tex_height
 					#print("vert: ", vert, " vs: ", vs, " d: ", vert.dot(vs), " vt: ", vt, " d: ", vert.dot(vt))
@@ -845,7 +843,6 @@ func read_bsp(source_file : String) -> Node:
 					parent_node.add_child(mesh_instance, true)
 					mesh_instance.transform = parent_inv_transform
 					mesh_instance.owner = root_node
-			#print("Unique vert count: ", unique_vert_index)
 			# Create meshes for each cell in the mesh grid.
 			for grid_index in mesh_grid:
 				var surface_tools : Dictionary = mesh_grid[grid_index] # Is there a way to loop through the keys instead?
