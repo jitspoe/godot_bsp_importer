@@ -799,7 +799,7 @@ func read_bsp(source_file : String) -> Node:
 					if (use_vertex_normal_array):
 						face_normals[i] = vertex_normal_values[vertex_normal_indexes[edge_list_index * 3]] # Need to multiply by 3 here because the indexes store normal, tangent, binormal
 					else:
-					face_normals[i] = face_normal
+						face_normals[i] = face_normal
 					face_uvs[i].x = vert.dot(vs) * tex_scale_x + s / tex_width
 					face_uvs[i].y = vert.dot(vt) * tex_scale_y + t / tex_height
 					#print("vert: ", vert, " vs: ", vs, " d: ", vert.dot(vs), " vt: ", vt, " d: ", vert.dot(vt))
