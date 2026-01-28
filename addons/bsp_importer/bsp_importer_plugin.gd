@@ -268,7 +268,7 @@ func _get_option_visibility(_option, _options, _unknown_dictionary):
 func _import(source_file : String, save_path : String, options : Dictionary, r_platform_variants, r_gen_files):
 	match source_file.get_extension().to_lower():
 		"wad":
-			var reader = WADReader.new()
+			var reader = WADReaderGSrc.new()
 			reader.read_wad(source_file)
 			reader.read_directory(source_file)
 			reader.name = source_file.get_file()
