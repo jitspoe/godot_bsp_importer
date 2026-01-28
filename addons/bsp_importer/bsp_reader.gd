@@ -1120,7 +1120,6 @@ func convert_entity_dict_to_scene(ent_dict_array : Array):
 
 
 func add_generic_entity(scene_node : Node, ent_dict : Dictionary):
-	prints("adding generic entity %s, %s" % [scene_node, ent_dict])
 	var origin := Vector3.ZERO
 	if (ent_dict.has("origin")):
 		var origin_string : String = ent_dict["origin"]
