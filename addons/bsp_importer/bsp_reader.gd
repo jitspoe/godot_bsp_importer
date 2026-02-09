@@ -1174,6 +1174,7 @@ func add_generic_entity(scene_node : Node, ent_dict : Dictionary):
 
 const _COLOR_STRING_NAME := StringName("_color")
 const COLOR_STRING_NAME := StringName("color")
+const SHADOW_STRING_NAME := StringName("render_shadow")
 
 
 func add_light_entity(ent_dict : Dictionary):
@@ -1181,16 +1182,24 @@ func add_light_entity(ent_dict : Dictionary):
 	var light_value := 300.0
 	var light_color := Color(1.0, 1.0, 1.0, 1.0)
 	var color_string : String
+	var render_shadow := false #should be true by default ??
+#	var normal_bias := 0.845
+#	var bias := 0.08
 	if (ent_dict.has(LIGHT_STRING_NAME)):
 		light_value = ent_dict[LIGHT_STRING_NAME].to_float()
 	if (ent_dict.has(_COLOR_STRING_NAME)):
 		light_color = string_to_color(ent_dict[_COLOR_STRING_NAME])
 	if (ent_dict.has(COLOR_STRING_NAME)):
 		light_color = string_to_color(ent_dict[COLOR_STRING_NAME])
+	if (ent_dict.has(SHADOW_STRING_NAME)):
+		render_shadow = bool(int(ent_dict[SHADOW_STRING_NAME]))
+		print(int(ent_dict[SHADOW_STRING_NAME]))
 	light_node.omni_range = light_value * unit_scale
 	light_node.light_energy = light_value * light_brightness_scale / 255.0
 	light_node.light_color = light_color
-	light_node.shadow_enabled = true # Might want to have an option to shut this off for some lights?
+	light_node.shadow_enabled = render_shadow
+#	light_node.shadow_normal_bias = normal_bias
+#	light_node.shadow_bias = bias
 	add_generic_entity(light_node, ent_dict)
 
 
