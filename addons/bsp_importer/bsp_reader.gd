@@ -51,7 +51,6 @@ const NODES_STRUCT_SIZE_Q1BSP2 := (4 + 4 + 4 + 4 * 6 + 4 + 4) # 32bit int for pl
 const LEAF_SIZE_Q1BSP := 4 + 4 + 2 * 6 + 2 + 2 + 1 + 1 + 1 + 1
 const LEAF_SIZE_BSP2 := 4 + 4 + 4 * 6 + 4 + 4 + 1 + 1 + 1 + 1
 
-
 class BSPEdge:
 	var vertex_index_0 : int
 	var vertex_index_1 : int
@@ -190,10 +189,36 @@ class BSPTextureInfo:
 		return get_data_size()
 
 
+## quake 3 has a lot of stuff i couldn't cleanly integrate into the BSPFace class - cslr
+class Q3BSPFace:
+	
+	var texture_idx: int
+	var effect: int
+	var type: int
+	
+	var first_vertex: int
+	var num_vertex: int
+	
+	var first_mesh_vertex: int
+	var num_mesh_vertex: int
+	
+	var lightmap_index: int
+	
+	var lightmap_start: Vector2
+	var lightmap_size: Vector2
+	
+	var lightmap_origin: Vector3
+	
+	var lightmap_vec_s: Vector3
+	var lightmap_vec_t: Vector3
+	
+	var normal: Vector3
+	var patch_size: Vector2
+
 class BSPFace:
 	var plane_id : int
 	var plane_side : int
-	var edge_list_id : int # var first_edge?
+	var edge_list_id : int # same as var first_edge?
 	var num_edges : int
 	var texinfo_id : int
 	var light_type : int
@@ -204,13 +229,9 @@ class BSPFace:
 	var lightmap_start : Vector2i
 	var lightmap_size : Vector2i
 	
-	# most Q3 stuff isnt needed with the current construction method but i'll probably figure that out later, otherwise that would go here. - cs
-	
 	var verts : PackedVector3Array = [] # For Mesh Construction
-	var q3_uv : PackedVector2Array
-	var q3_uv2 : PackedVector2Array
-	var vert_normal : Vector3 = Vector3.ZERO
-	var face_normal : Vector3 = Vector3.ZERO
+	var texture_info : BSPTextureInfo
+	
 	
 	static func get_data_size_q1bsp() -> int:
 		return 20
@@ -329,9 +350,9 @@ var fullbright_range : PackedInt32Array = [224, 255]
 var ignored_flags : PackedInt64Array = []
 var include_sky_surfaces := true
 
-# used for reading wads for goldsource games.
+# used for reading wads for goldsrc games.
 var is_gsrc : bool = false 
-var wad_paths : Array[WADReader] = []
+var wad_paths : Array[WADReaderGSrc] = []
 
 func clear_data():
 	error = ERR_UNCONFIGURED
@@ -390,32 +411,44 @@ func read_bsp(source_file : String) -> Node:
 	var index_bits_32 := false
 	print("BSP version: %d\n" % bsp_version, " ")
 	is_gsrc = (bsp_version == 30) # check if its goldsrc so it doesn't try to look for textures in WADs for non-goldsrc formats.
-	if is_gsrc:
-		create_wad_table()
-		prints("WADs located.")
 	
-	if (bsp_version == 1347633737): # "IBSP" - Quake 2 BSP format, this also creates for Quake 3.
-		var bsp_q2_texts = [
-			"Moving File %s to QBSPi2" % source_file.get_file().get_basename(),
-			"QBSPi2 is Our Lord and Savior!, said literally no one ever.",
-			"Why did jitspoe decide QBSPi2 should be in here??",
-			"Why did I decide QBSPi2 would be a fun project?? like?? why???",
-			
-		]
+	if is_gsrc:
+		#print("Hey look it's a Goldsrc BSP File! these are broken.")
+		create_wad_table()
 		
-		prints("IBSP Format Detected.", bsp_q2_texts.pick_random())
+		#file.close()
+		#file = null
+		#return
 		
+	
+	if (bsp_version == 1347633737): # "IBSP" - Quake 2/3 BSP format
 		# Keeping these for safety!
 		is_q2 = true
 		has_textures = false
 		has_clipnodes = false
 		has_brush_table = true
-		bsp_version = file.get_32()
+		var bsp_subversion := file.get_32()
 		
-		print("BSP sub-version: %d\n" % bsp_version)
+		print("BSP sub-version: %d\n" % bsp_subversion)
+		
+		if bsp_subversion == 38:
+			
+			var node := read_bsp_q2(source_file, file)
+			
+			file.close()
+			file = null 
+			return node
+		
+		elif bsp_subversion == 46:
+			var node := read_bsp_q3(source_file, file)
+			
+			file.close()
+			file = null 
+			return node
 		file.close()
 		file = null
-		return convertBSPtoScene(source_file)
+		return
+	
 	if (bsp_version == 1112756274): # "2PSB" - depricated extended quake BSP format.
 		print("2PSB format not supported.")
 		file.close()
@@ -1468,15 +1501,16 @@ func convert_planes_to_points(convex_planes : Array[Plane]) -> PackedVector3Arra
 #	return clipper.vertices
 
 func create_wad_table():
+	pass
 	var wad_path = texture_path_pattern.replace("{texture_name}.png",  "wad/")
 	if not DirAccess.dir_exists_absolute(wad_path): DirAccess.make_dir_recursive_absolute(wad_path)
 	var files_in_dir = DirAccess.get_files_at(wad_path)
 	
 	for file in files_in_dir:
 		if file.get_extension() == "wad":
-			var w : WADReader = load(wad_path + file).instantiate()
+			var w : WADReaderGSrc = load(wad_path + file).instantiate()
 			wad_paths.append(w)
-			prints("loading", w)
+			prints("loading gsrc wad", w)
 
 # BSPTexture is optional, for handling Q1 BSP files that have textures embedded.
 func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null) -> MaterialInfo:
@@ -1510,11 +1544,28 @@ func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null)
 		if (texture):
 			width = texture.get_width()
 			height = texture.get_height()
-			print(name, ": External image width: ", width, " height: ", height)
-	elif (!ResourceLoader.exists(image_path) && !is_gsrc):
+			#print(name, ": External image width: ", width, " height: ", height)
+	elif (!ResourceLoader.exists(image_path)):
 		print("Could not load ", original_image_path)
+		if is_gsrc:
+				var found_texture: bool
+				for wad in wad_paths:
+					var n = name.to_lower()
+					if wad.resources.has(n):
+						var struct = wad.resources.get(n)
+						texture = wad.load_texture(struct, texture_path_pattern.replace("{texture_name}", struct.get("name")), true)
+						found_texture = true
+				if not found_texture:
+					# bit ugly but because gsrc has to load from wads we need to do this early exit so the bsp importer doesnt read garbage data.
+					material = StandardMaterial3D.new()
+					material.albedo_color = Color(randf_range(0.0, 1.0), randf_range(0.0, 1.0), randf_range(0.0, 1.0))
+					var material_info := MaterialInfo.new()
+					material_info.material = material
+					material_info.width = width
+					material_info.height = height
+					return material_info
 	
-	# finally, check for if it is goldsrc to read the wad.
+		# finally, check for if it is goldsrc to read the wad.
 	# this code is pretty sucky wucky :-( probably better for memory management
 	if (!ResourceLoader.exists(image_path) && is_gsrc):
 		for wad in wad_paths:
@@ -1522,7 +1573,6 @@ func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null)
 			if wad.resources.has(n):
 				var struct = wad.resources.get(n)
 				texture = wad.load_texture(struct, texture_path_pattern.replace("{texture_name}", struct.get("name")), true)
-	
 	
 	var image_emission_path : String
 	image_emission_path = texture_emission_path_pattern.replace("{texture_name}", name)
@@ -1735,856 +1785,13 @@ func generate_default_palette():
 		default_palette[255*3+2] = 84
 	return default_palette
 
-
-# CSLR's Q2BSP importer code -- probably lots of redundant stuff here that should be merged into a common code path.
-
-enum {LUMP_OFFSET, LUMP_LENGTH}
-var geometry := {}
-var textures := {}
-var lightmap_texture : Image
-
-var entities := []
-
-var models := []
-
-
-class BSPPlane:
-	var normal := Vector3.ZERO
-	var distance : float = 0
-	var type : int = 0 # ? 
-
-class BSPBrush:
-	var first_brush_side : int = 0
-	var num_brush_side : int = 0
-	var flags : int = 0
-
-class BSPBrushSide:
-	var plane_index : int = 0
-	var texture_information : int = 0
-
-
-
-func convertBSPtoScene(file_path : String) -> Node:
-	prints("Converting File", file_path, ". Please Keep in Mind Quake 2 Support is Still in Development and has some issues. file an issue on github if an issue occurs -cs")
-	
-	var file_name = file_path.get_base_dir()
-	print(file_name)
-	
-	root_node = StaticBody3D.new()
-	var MeshInstance = convert_to_mesh(file_path) 
-	var CollisionShape = CollisionShape3D.new()
-	
-	var cnn = str("BSP_", file_path.get_basename().trim_prefix(file_path.get_base_dir())).replace("/", "")
-	root_node.name = cnn
-	
-	root_node.add_child(MeshInstance)
-	
-	MeshInstance.owner = root_node
-	
-	var collisions = create_collisions()
-	
-	for collision in collisions:
-		var cs = CollisionShape3D.new()
-		root_node.add_child(cs)
-		cs.owner = root_node
-		cs.shape = collision
-		cs.name = str('brush', RID(collision).get_id())
-	
-	root_node.set_collision_layer_value(2, true)
-	root_node.set_collision_mask_value(2, true)
-	
-	
-	return root_node
-
-const Q2_TABLE = [
-  "LUMP_ENTITIES",
-  "LUMP_PLANE",
-  "LUMP_VERTEX",
-  "LUMP_VIS",
-  "LUMP_NODE",
-  "LUMP_TEXTURE",
-  "LUMP_FACE",
-  "LUMP_LIGHTMAP",
-  "LUMP_LEAVES",
-  "LUMP_LEAF_FACE_TABLE",
-  "LUMP_LEAF_BRUSH_TABLE",
-  "LUMP_EDGE",
-  "LUMP_FACE_EDGE",
-  "LUMP_MODEL",
-  "LUMP_BRUSH",
-  "LUMP_BRUSH_SIDE"
-];
-
-const Q3_TABLE = [
-  "LUMP_ENTITIES",
-  "LUMP_TEXTURE",
-  "LUMP_PLANE", 
-  "LUMP_NODES",
-  "LUMP_LEAVES",
-  "LUMP_LEAF_FACE_TABLE",
-  "LUMP_LEAF_BRUSH_TABLE",
-  "LUMP_MODEL",
-  "LUMP_BRUSH",
-  "LUMP_BRUSH_SIDE",
-  "LUMP_VERTEX",
-  "LUMP_MESH_VERTEX",
-  "LUMP_EFFECT",
-  "LUMP_FACE",
-  "LUMP_LIGHTMAP",
-  "LUMP_LIGHTVOL",
-  "LUMP_VISDATA",
-]
-
-var QBSPi3 = false
-var QBSPi2 = false
-
-## Central Function
-func convert_to_mesh(file, table : PackedStringArray = Q2_TABLE):
-	var bsp_bytes : PackedByteArray = FileAccess.get_file_as_bytes(file)
-	var bsp_version = str(convert_from_uint32(bsp_bytes.slice(4, 8)))
-	var magic_num = bsp_bytes.slice(0, 4).get_string_from_utf8()
-	QBSPi2 = bsp_version == "38"
-	
-	prints("QBSPi2 Found BSP Version %s %s" % [magic_num, bsp_version])
-
-	if bsp_version == "46":
-		print("Quake 3 Magic num detected, switching to QBSPi3. yeah theres 3 now.")
-		QBSPi3 = true
-		table = Q3_TABLE
-		
-		#return MeshInstance3D.new();
-	
-	
-	var directory : Dictionary = fetch_directory(bsp_bytes)
-	var lmp_table : Dictionary = {}
-	
-	
-	for entry in table:
-		var entry_key = table.find(entry)
-		lmp_table[entry] = range(directory[entry_key].get(LUMP_OFFSET), directory[entry_key].get(LUMP_OFFSET)+directory[entry_key].get(LUMP_LENGTH))
-	
-	geometry = {}
-	textures = {}
-	
-	var mi := MeshInstance3D.new()
-	
-	process_entity_lmp(bytes(bsp_bytes, lmp_table.LUMP_ENTITIES))
-	
-	
-	if QBSPi3:
-		textures["lumps"] = get_texture_lmp(bytes(bsp_bytes, lmp_table.LUMP_TEXTURE))
-		geometry["vertex"] = get_verts(bytes(bsp_bytes, lmp_table.LUMP_VERTEX))
-		geometry["mesh_vertex"] = get_mesh_verts(bytes(bsp_bytes, lmp_table.LUMP_MESH_VERTEX))
-		
-		OS.delay_msec(100) # some weird issue here, delaying seems to fix it
-		geometry["face"] = get_face_lump(bytes(bsp_bytes, lmp_table.LUMP_FACE))
-		
-		lightmap_texture = get_lightmap_lump(bytes(bsp_bytes, lmp_table.LUMP_LIGHTMAP))
-		geometry["plane"] = get_planes(bytes(bsp_bytes, lmp_table.LUMP_PLANE))
-		
-		geometry["brush_side"] = get_brush_sides(bytes(bsp_bytes, lmp_table.LUMP_BRUSH_SIDE))
-		geometry["brush"] = get_brushes(bytes(bsp_bytes, lmp_table.LUMP_BRUSH))
-		
-	
-	
-	if QBSPi2:
-		
-		models = get_models(bytes(bsp_bytes, lmp_table.LUMP_MODEL))
-		
-		geometry["plane"] = get_planes(bytes(bsp_bytes, lmp_table.LUMP_PLANE))
-		geometry["vertex"] = get_verts(bytes(bsp_bytes, lmp_table.LUMP_VERTEX))
-		geometry["face"] = get_face_lump(bytes(bsp_bytes, lmp_table.LUMP_FACE))
-		geometry["edge"] = get_edges(bytes(bsp_bytes, lmp_table.LUMP_EDGE))
-		geometry["face_edge"] = get_face_edges(bytes(bsp_bytes, lmp_table.LUMP_FACE_EDGE))
-		geometry["brush"] = get_brushes(bytes(bsp_bytes, lmp_table.LUMP_BRUSH))
-		geometry["brush_side"] = get_brush_sides(bytes(bsp_bytes, lmp_table.LUMP_BRUSH_SIDE))
-		textures["lumps"] = get_texture_lmp(bytes(bsp_bytes, lmp_table.LUMP_TEXTURE))
-		
-		process_to_mesh_array(geometry)
-	
-	var mesh := create_mesh(geometry["face"])
-	var arm := ArrayMesh.new()
-	
-	for surface in mesh.get_surface_count():
-		arm.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, mesh.surface_get_arrays(surface))
-		arm.surface_set_material(surface, mesh.surface_get_material(surface))
-	if (generate_lightmap_uv2):
-		arm.lightmap_unwrap(mi.global_transform, unit_scale * 4.0)
-	mi.mesh = arm
-	
-	return mi
-
-func origin_to_vec(origin : String) -> Vector3:
-	var v = Vector3.ZERO
-	var pos = origin.split(" ")
-	var vec = Vector3(pos[0].to_int(), pos[1].to_int(), pos[2].to_int())
-	v = BSPReader.new().convert_vector_from_quake_unscaled(vec)
-	return v
-
-
-func get_lightmap_lump(data : PackedByteArray) -> Image:
-	var texture : Image = Image.create(1, 1, false, Image.FORMAT_RGB8)
-	if QBSPi3:
-		var count = data.size() / 49152
-		texture = Image.create(128 * count + 128, 128, false, Image.FORMAT_RGB8)
-		print(count, texture.get_size())
-		for i in range(0, count, 1):
-			for x in range(0, 128):
-				for y in range(0, 128):
-					var index : int = i * 49152 + y * (128 * 3) + x * 3
-					var r : int = data[index]
-					var g : int = data[index + 1]
-					var b : int = data[index + 2]
-					#prints(r, g, b)
-					
-					texture.set_pixel(x + (i * 128), y, Color(r, g, b) / 255.0)
-		#texture.save_png("user://lightmap_data.png")
-		#output.append(ImageTexture.create_from_image(texture))
-	return texture
-
-## takes the vertex, face, edge and face edge arrays and outputs an array of all the edge points.
-func process_to_mesh_array(geometry : Dictionary) -> void:
-	var output_verts = []
-	var face_vertex_indices = []
-	
-	var verts = geometry.get("vertex")
-	var edges = geometry.get("edge")
-	var face_edges = geometry.get("face_edge")
-	
-	for face_index in geometry.get("face"):
-		var face = face_index as BSPFace
-		var first_edge = face.edge_list_id
-		var num_edges = face.num_edges
-		
-		var edge_range = range(first_edge, first_edge + num_edges)
-		
-		var face_vert_list = []
-		var face_vert_out = []
-		
-		for edge in edge_range:
-			
-			var face_edge = face_edges[edge]
-			
-			edge = edges[abs(face_edge)]
-			
-			var edge0 = edge[0]
-			var edge1 = edge[1]
-			
-			if face_edge > 0:
-				edge0 = edge[0]
-				edge1 = edge[1]
-			
-			if face_edge < 0:
-				edge0 = edge[1]
-				edge1 = edge[0]
-			
-			var vert0 = verts[edge0]
-			var vert1 = verts[edge1]
-			
-			face_vert_list.append_array([vert0, vert1])
-			
-		
-		for v in range(0, face_vert_list.size()-2):
-			
-			var vert0 = face_vert_list[0]
-			var vert1 = face_vert_list[v + 1]
-			var vert2 = face_vert_list[v + 2]
-			
-			face_vert_out.append(vert0)
-			face_vert_out.append(vert1)
-			face_vert_out.append(vert2)
-		
-		face.verts = face_vert_out
-
-func process_entity_lmp(ent_bytes : PackedByteArray) -> void:
-	prints("a unicode passing error may accur, this is 'normal'.")
-	var entity_string : String = ent_bytes.get_string_from_utf8()
-	var entity_output = parse_entity_string(entity_string)
-	var parsed = convert_entity_dict_to_scene(entity_output)
-	
-
-## grabs the directory
-func fetch_directory(bsp_bytes):
-	prints("QBSPi2 BSP File Size:", bsp_bytes.size())
-	var i = 0
-	var dir = {}
-	var dir_lump = bytes( bsp_bytes, range(8, ( 19 * 8 ) ))
-	
-	for lump in range(0, dir_lump.size()-8, 8):
-		
-		var offset = bytes(dir_lump, range(lump+0, lump+4)).decode_u32(0)
-		var length = bytes(dir_lump, range(lump+4, lump+8)).decode_u32(0)
-		
-		dir[lump / 8] = {LUMP_OFFSET: offset, LUMP_LENGTH: length}
-		
-		
-	return dir
-
-func get_planes(plane_bytes : PackedByteArray) -> Array[BSPPlane]:
-	var planes : Array[BSPPlane] = []
-	 
-	# basically 
-	
-	if QBSPi3:
-		
-		var count = plane_bytes.size() / 16
-		print("QBSPi3 Calculated Estimate of %s Planes." % count)
-		for index in range(0, plane_bytes.size(), 16):
-			var norm_x = bytes(plane_bytes, range(index + 0, index + 4)).decode_float(0)
-			var norm_y = bytes(plane_bytes, range(index + 4, index + 8)).decode_float(0)
-			var norm_z = bytes(plane_bytes, range(index + 8, index + 12)).decode_float(0)
-			
-			var distance = bytes(plane_bytes, range(index + 12, index + 16)).decode_float(0)
-			
-			var plane = BSPPlane.new()
-			plane.normal = convert_vector_from_quake_unscaled(Vector3(norm_x, norm_y, norm_z))
-			plane.distance = distance
-			
-			planes.append(plane)
-	
-	if QBSPi2:
-		var count = plane_bytes.size() / 20
-		print("QBSPi2 Calculated Estimate of %s Planes." % count)
-		for index in range(0, plane_bytes.size(), 20):
-			var norm_x = bytes(plane_bytes, range(index + 0, index + 4)).decode_float(0)
-			var norm_y = bytes(plane_bytes, range(index + 4, index + 8)).decode_float(0)
-			var norm_z = bytes(plane_bytes, range(index + 8, index + 12)).decode_float(0)
-			
-			var distance = bytes(plane_bytes, range(index + 12, index + 16)).decode_float(0)
-			
-			var type = bytes(plane_bytes, range(index + 16, index + 20)).decode_u32(0)
-			
-			var plane = BSPPlane.new()
-			plane.normal = convert_vector_from_quake_unscaled(Vector3(norm_x, norm_y, norm_z))
-			plane.distance = distance
-			plane.type = type
-			planes.append(plane)
-	return planes
-
-
-func get_brushes(brush_bytes : PackedByteArray):
-	var count = brush_bytes.size() / 12
-	print("QBSPi2 Calculated Estimate of %s Brushes" % count)
-	var brushes = []
-	
-	for index in range(0, brush_bytes.size(), 12):
-		var brush = BSPBrush.new()
-		var first_brush_side = bytes(brush_bytes, range(index + 0, index + 4)).decode_u32(0)
-		var num_brush_side = bytes(brush_bytes, range(index + 4, index + 8)).decode_u32(0)
-		var flags = bytes(brush_bytes, range(index + 8, index + 10)).decode_u16(0) 
-		
-		if QBSPi3:
-			first_brush_side = bytes(brush_bytes, range(index + 0, index + 4)).decode_s32(0) # Quake 3 moved to s32 for everything by the looks of it, accounting for it here
-			num_brush_side = bytes(brush_bytes, range(index + 4, index + 8)).decode_s32(0)
-			flags = bytes(brush_bytes, range(index + 8, index + 12)).decode_s32(0) # seems to be responsible for texture path in quake 3.
-			#prints("brush flags:", flags, textures["lumps"][flags].texture_path)
-		
-		
-		brush.first_brush_side = first_brush_side
-		brush.num_brush_side = num_brush_side
-		brush.flags = flags
-		
-		
-		brushes.append(brush)
-	return brushes
-
-func get_brush_sides(brush_side_bytes : PackedByteArray):
-	var count = brush_side_bytes.size() / 4
-	print("QBSPi2 Calculated Estimate of %s Brush Sides" % count)
-	var brush_sides = []
-	for index in range(0, brush_side_bytes.size(), 8 if QBSPi3 else 4):
-		
-		var plane_index = bytes(brush_side_bytes, range(index + 0, index + 2)).decode_u16(0)
-		var texture_information = bytes(brush_side_bytes, range(index + 2, index + 4)).decode_s16(0)
-		
-		if QBSPi3:
-			plane_index = bytes(brush_side_bytes, range(index + 0, index + 4)).decode_u32(0)
-			texture_information = bytes(brush_side_bytes, range(index + 4, index + 8)).decode_s32(0)
-			
-		
-		var brush_side = BSPBrushSide.new()
-		
-		brush_side.plane_index = plane_index
-		brush_side.texture_information = texture_information
-		
-		brush_sides.append(brush_side)
-	return brush_sides
-
-func get_mesh_verts(vert_bytes : PackedByteArray) -> PackedInt64Array:
-	var vertex_array : PackedInt64Array = []
-	
-	if QBSPi3:
-		var count = vert_bytes.size() / 4
-		for i in range(0, vert_bytes.size(), 4):
-			var vert = bytes( vert_bytes, range(i, i + 4) ).decode_s32(0)
-			vertex_array.append(vert)
-	
-	return vertex_array
-
-## returns vertex lump
-func get_verts(vert_bytes : PackedByteArray) -> PackedVector3Array:
-	var vertex_array : PackedVector3Array = []
-	#return vertex_array
-	if QBSPi3:
-		geometry["vertex_uv_q3"] = []
-		geometry["vertex_uv2_q3"] = []
-		geometry["normal"] = []
-		geometry["color"] = []
-		#return vertex_array
-		var count = vert_bytes.size() / 44
-		print("QBSPi3 Calculated Estimate of %s Vertices, THIS MAY TAKE A WHILE" % count)
-		
-		var v = 0
-		
-		while v < count:
-			var index = (v * 44)
-			var xbytes = bytes(vert_bytes, range( index + 0, index + 4 )).decode_float(0)
-			var ybytes = bytes(vert_bytes, range( index + 4, index + 8 )).decode_float(0)
-			var zbytes = bytes(vert_bytes, range( index + 8, index + 12 )).decode_float(0)
-			var vertex_vec = convert_vector_from_quake_unscaled(Vector3(xbytes, ybytes, zbytes))
-			
-			var u1 = (bytes(vert_bytes, range( index + 12, index + 16 )).decode_float(0))
-			var v1 = (bytes(vert_bytes, range( index + 16, index + 20 )).decode_float(0))
-			var u2 = bytes(vert_bytes, range( index + 20, index + 24 )).decode_float(0)
-			var v2 = bytes(vert_bytes, range( index + 24, index + 28 )).decode_float(0)
-			
-			var nx = bytes(vert_bytes, range( index + 28, index + 32 )).decode_float(0)
-			var ny = bytes(vert_bytes, range( index + 32, index + 36)).decode_float(0)
-			var nz = bytes(vert_bytes, range( index + 36, index + 40)).decode_float(0)
-			var normal_vec = convert_vector_from_quake_unscaled(Vector3(xbytes, ybytes, zbytes))
-			
-			var CR = bytes(vert_bytes, range( index + 40, index + 41)).decode_u8(0)
-			var CG = bytes(vert_bytes, range( index + 41, index + 42)).decode_u8(0)
-			var CB = bytes(vert_bytes, range( index + 42, index + 43)).decode_u8(0)
-			var CA = bytes(vert_bytes, range( index + 43, index + 44)).decode_u8(0)
-			var color = Color(CR / 255.0, CG / 255.0, CB / 255.0, CA / 255.0)
-			
-			
-			geometry["vertex_uv_q3"].append(Vector2(u1, v1))
-			geometry["vertex_uv2_q3"].append(Vector2(u2, v2))
-			geometry["color"].append(color)
-			geometry["normal"].append(normal_vec)
-			
-			vertex_array.append(vertex_vec)
-			
-			v += 1
-			
-		prints("QBPSi3 Vert construction complete", vertex_array.size())
-	
-	
-	if QBSPi2:
-		var count = vert_bytes.size() / 12
-		
-		print("QBSPi2 Calculated Estimate of %s Vertices" % count)
-		
-		var v = 0
-		while v < count:
-			
-			var xbytes = bytes(vert_bytes, range( (v * 12) + 0, (v * 12) + 4 )).decode_float(0)
-			var ybytes = bytes(vert_bytes, range( (v * 12) + 4, (v * 12) + 8 )).decode_float(0)
-			var zbytes = bytes(vert_bytes, range( (v * 12) + 8, (v * 12) + 12 )).decode_float(0)
-			
-			var vec = convert_vector_from_quake_unscaled(Vector3(xbytes, ybytes, zbytes))
-			vertex_array.append(vec)
-			v += 1
-	return vertex_array
-
-## returns face lump
-func get_face_lump(lump_bytes : PackedByteArray):
-	var faces : Array[BSPFace] = []
-	#prints("geometry", geometry)
-	
-	if QBSPi3:
-		var count = lump_bytes.size() / 104
-		var f = 0
-		while f < count:
-			var new_face := BSPFace.new()
-			var base_index = f * 104
-			var by = bytes(lump_bytes, range(base_index, base_index + 104))
-			
-			var texture = by.decode_s32(0)
-			var effect = by.decode_s32(4)
-			var type = by.decode_s32(8)
-			
-			var first_vert = by.decode_s32(12)
-			var num_verts = by.decode_s32(16)
-			
-			var first_mesh_vert = by.decode_s32(20)
-			var num_mesh_verts = by.decode_s32(24)
-			
-			var lightmap_index = by.decode_s32(28)
-			
-			var lightmap_stx = by.decode_s32(32) 
-			var lightmap_sty = by.decode_s32(36)
-			
-			var lightmap_six = by.decode_s32(40) 
-			var lightmap_siy = by.decode_s32(44)
-			
-			var lightmap_start = Vector2(lightmap_stx, lightmap_sty)
-			var lightmap_size = Vector2(lightmap_six, lightmap_siy)
-			
-			
-			var vert_range = range(first_vert, first_vert + num_verts)
-			var mesh_vert_range = range(first_mesh_vert, first_mesh_vert + num_mesh_verts)
-			
-			var fnx = by.decode_float(88)
-			var fny = by.decode_float(92)
-			var fnz = by.decode_float(96)
-			var face_normal = convert_vector_from_quake_unscaled(Vector3(fnx, fny, fnz))
-			
-			var out_verts : PackedVector3Array = []
-			var out_uv = []
-			var out_uv2 = []
-			var temp_uv = []
-			var temp_uv2 = []
-			var polygon_verts : PackedVector3Array = []
-			var mesh_verts = []
-			
-			for j in mesh_vert_range:
-				mesh_verts.append(geometry["mesh_vertex"][j])
-			match type:
-				1: # Polygon face
-					for i in vert_range: 
-						polygon_verts.append(geometry["vertex"][i])
-						temp_uv.append(geometry["vertex_uv_q3"][i])
-						temp_uv2.append(geometry["vertex_uv2_q3"][i])
-					
-					for v in mesh_verts: 
-						out_verts.append(polygon_verts[v])
-						out_uv.append(temp_uv[v])
-						out_uv2.append(temp_uv2[v])
-			
-			new_face.lightmap = lightmap_index
-			new_face.lightmap_start = lightmap_start
-			new_face.lightmap_size = lightmap_size
-			new_face.texinfo_id = texture
-			new_face.verts = out_verts
-			new_face.face_normal = face_normal
-			new_face.q3_uv = out_uv
-			new_face.q3_uv2 = out_uv
-			faces.append(new_face)
-			f += 1
-	
-	if QBSPi2: 
-		var count = lump_bytes.size() / 20
-		prints("QBSPi2 Calculated Estimate of %s Faces" % count)
-		var f = 0
-		
-		
-		while f < count:
-			var new_face := BSPFace.new()
-			var base_index = f * 20
-			
-			var by = bytes(lump_bytes, range(base_index, base_index + 20))
-			
-			new_face.plane_id     = by.decode_u16(0)
-			new_face.plane_side   = by.decode_u16(2)
-			new_face.edge_list_id = by.decode_u32(4)
-			new_face.num_edges    = by.decode_u16(8)
-			new_face.texinfo_id   = by.decode_u16(10)
-			
-			faces.append(new_face)
-			f += 1
-		
-	return faces
-
-
-
-## returns texture lump
-func get_texture_lmp(tex_bytes : PackedByteArray) -> Array:
-	
-	var output = []
-	
-	if QBSPi3:
-		var count = float(tex_bytes.size()) / 72.0
-		prints("QBSPi2 Calculated Estimate of %s Texture References" % count)
-		for b in range(0, tex_bytes.size(), 72):
-			var BSPTI := BSPTextureInfo.new()
-			var texture_name = bytes(tex_bytes, range(b, b + 64)).get_string_from_ascii()
-			BSPTI.texture_path = texture_name
-			BSPTI.flags = bytes(tex_bytes, range(b + 64, b + 68)).decode_s32(0)
-			#V not integrated V
-			#BSPTI.contents = bytes(tex_bytes, range(b + 68, b + 72)).decode_s32(0)
-			#^ not integrated ^
-			
-			output.append(BSPTI)
-		
-	if QBSPi2:
-		var count = tex_bytes.size() / 76
-		prints("QBSPi2 Calculated Estimate of %s Texture References" % count)
-		
-		
-		for b in range(0, tex_bytes.size(), 76):
-			var BSPTI := BSPTextureInfo.new()
-			
-			var ux = bytes(tex_bytes, range(b, b + 4)).decode_float(0)
-			var uy = bytes(tex_bytes, range(b + 4, b + 8)).decode_float(0)
-			var uz = bytes(tex_bytes, range(b + 8, b + 12)).decode_float(0)
-			
-			var uoffset = bytes(tex_bytes, range(b + 12, b + 16)).decode_float(0)
-			
-			var vx = bytes(tex_bytes, range(b + 16, b + 20)).decode_float(0)
-			var vy = bytes(tex_bytes, range(b + 20, b + 24)).decode_float(0)
-			var vz = bytes(tex_bytes, range(b + 24, b + 28)).decode_float(0)
-			
-			var voffset = bytes(tex_bytes, range(b + 28, b + 32)).decode_float(0)
-			
-			var flags = bytes(tex_bytes, range(b + 32, b + 36)).decode_u32(0)
-			var value = bytes(tex_bytes, range(b + 36, b + 40)).decode_u32(0)
-			
-			var texture_path = bytes(tex_bytes, range(b + 40, b + 72)).get_string_from_utf8()
-			
-			var next_texinfo = bytes(tex_bytes, range(b + 72, b + 76)).decode_s32(0)
-			
-			BSPTI.vec_s = convert_vector_from_quake_unscaled(Vector3(ux, uy, uz))
-			BSPTI.offset_s = uoffset
-			BSPTI.vec_t = convert_vector_from_quake_unscaled(Vector3(vx, vy, vz))
-			BSPTI.offset_t = voffset
-			BSPTI.flags = flags
-			BSPTI.value = value
-			BSPTI.texture_path = texture_path
-			
-			output.append(BSPTI)
-			
-		
-	return output
-
-## returns edge lump
-func get_edges(edge_bytes : PackedByteArray):
-	var count = edge_bytes.size() / 4
-	var e = 0
-	var edges = []
-	while e < count:
-		var index = e * 4
-		var edge_1 = bytes(edge_bytes, range(index + 0, index + 2)).decode_u16(0)
-		var edge_2 = bytes(edge_bytes, range(index + 2, index + 4)).decode_u16(0)
-		
-		
-		edges.append([edge_1, edge_2])
-		e += 1
-	
-	return edges
-
-## returns face edge lump
-func get_face_edges(face_bytes : PackedByteArray):
-	var count = face_bytes.size() / 4
-	prints("QBSPi2 Calculated Estimate of %s Face Edges" % count)
-	var f = 0
-	var face_edges = []
-	while f < count:
-		var index = f * 4 
-		var f1 = bytes(face_bytes, range(index + 0, index + 4)).decode_s32(0)
-		face_edges.append(f1)
-		f += 1
-	
-	return face_edges
-## i dont know what models are used for but if someone could tell me that would be good.
-func get_models(model_bytes : PackedByteArray):
-	var count = model_bytes.size() / 48 
-	prints("QBSPi2 Calculated Estimate of %s Models" % count)
-	
-	for m in range(0, model_bytes.size(), 48):
-		var a1 = bytes(model_bytes, range(m + 0, m + 4)).decode_float(0)
-		var a2 = bytes(model_bytes, range(m + 4, m + 8)).decode_float(0)
-		var b1 = bytes(model_bytes, range(m + 8, m + 12)).decode_float(0)
-		var b2 = bytes(model_bytes, range(m + 12, m + 16)).decode_float(0)
-		var c1 = bytes(model_bytes, range(m + 16, m + 20)).decode_float(0)
-		var c2 = bytes(model_bytes, range(m + 20, m + 24)).decode_float(0)
-		
-		var ox = bytes(model_bytes, range(m + 24, m + 28)).decode_float(0)
-		var oy = bytes(model_bytes, range(m + 28, m + 32)).decode_float(0)
-		var oz = bytes(model_bytes, range(m + 32, m + 36)).decode_float(0)
-		
-		var head = bytes(model_bytes, range(m + 36, m + 40)).decode_s32(0)
-		
-		var first_face = bytes(model_bytes, range(m + 40, m + 44)).decode_u32(0)
-		var num_faces = bytes(model_bytes, range(m + 44, m + 48)).decode_u32(0)
-		
-	return []
-
-func create_collisions():
-	var collisions = []
-	var final_verts = []
-	if geometry.has("brush"):
-		for brush in geometry["brush"]:
-			var brush_planes : Array[Plane] = []
-			brush = brush as BSPBrush
-			var brush_side_range = range(brush.first_brush_side, (brush.first_brush_side + brush.num_brush_side))
-			var q3_compliant : bool = false
-			
-			if QBSPi3:
-				var file_name = str(textures.lumps[brush.flags].texture_path).get_file()
-				q3_compliant = !ignored_flags.has(brush.flags)
-				
-			
-			if (QBSPi2 && brush.flags == 1) or q3_compliant:
-				for brush_side_index in brush_side_range:
-					var brush_side = geometry["brush_side"][brush_side_index]
-					var plane = geometry["plane"][brush_side.plane_index] as BSPPlane
-					
-					var plane_vec = Plane(plane.normal, plane.distance * unit_scale)
-					
-					brush_planes.append(plane_vec)
-				
-				var verts = Geometry3D.compute_convex_mesh_points(brush_planes)
-				var collision = ConvexPolygonShape3D.new()
-				
-				collision.set_points(verts)
-				collisions.append(collision)
-	
-	return collisions
-
-func convert_face_uv2_for_lightmap(lightmap_index : int, lm_start : Vector2i, lm_size : Vector2i, lightmap_uv : Vector2) -> Vector2:
-	var atlas_size = Vector2(lightmap_texture.get_size()) # Size of the entire atlas
-	var lightmap_offset_in_atlas = Vector2i(lightmap_index * 128, 0)
-	var absolute_lm_start = Vector2(lightmap_offset_in_atlas) + Vector2(lm_start) 
-	var uv_offset_in_lightmap = Vector2(lightmap_uv) * Vector2(lm_size)
-	var absolute_uv = Vector2(absolute_lm_start) + Vector2(uv_offset_in_lightmap)
-	var normalized_uv = Vector2(absolute_uv) / Vector2(atlas_size)
-	return normalized_uv
-
-
-func create_mesh(face_data : Array[BSPFace]) -> Mesh:
-	var mesh = ArrayMesh.new()
-	var texture_list = textures["lumps"] if textures.has("lumps") else []
-	var surface_list := {}
-	var material_info_lookup := {}
-	var missing_textures := []
-	var mesh_arrays := []
-	mesh_arrays.resize(Mesh.ARRAY_MAX)
-	
-	# seperating them for reasons
-	if QBSPi3:
-		for texture in texture_list:
-			texture = texture as BSPTextureInfo
-			
-			if not surface_list.has(texture.texture_path):
-				var st =  SurfaceTool.new()
-				#prints("creating new tool for", texture.texture_path)
-				surface_list[texture.texture_path] = st
-				st.begin(Mesh.PRIMITIVE_TRIANGLES)
-		
-		for face in face_data:
-			var texture : BSPTextureInfo = texture_list[face.texinfo_id]
-			var ignore_surface := ignored_flags.has(texture.flags) # Can probably get rid of this once all the normal skipping flags are added
-			if (texture.flags & (SURFACE_FLAG_NODRAW | SURFACE_FLAG_HINT | SURFACE_FLAG_SKIP)):
-				ignore_surface = true
-			if (!include_sky_surfaces && (texture.flags & SURFACE_FLAG_SKY)):
-				ignore_surface = true
-			if surface_list.has(texture.texture_path) and !ignore_surface:
-				var surface_tool : SurfaceTool = surface_list.get(texture.texture_path)
-				var material_info : MaterialInfo = material_info_lookup.get(surface_tool, null)
-				if (!material_info):
-					material_info = load_or_create_material(texture.texture_path)
-					material_info_lookup[surface_tool] = material_info
-				var material : StandardMaterial3D = material_info.material
-				var width := material_info.width
-				var height := material_info.height
-				var verts = face.verts
-				
-				var tex_size_vec = Vector2(material_info.width, material_info.height)
-				for vertIndex in range(0, verts.size(), 3):
-					var v0 = verts[vertIndex + 0]
-					var v1 = verts[vertIndex + 1]
-					var v2 = verts[vertIndex + 2] 
-					
-					var uv0 : Vector2 = face.q3_uv[vertIndex + 0]
-					var uv1 : Vector2 = face.q3_uv[vertIndex + 1]
-					var uv2 : Vector2 = face.q3_uv[vertIndex + 2]
-					
-					var lm_uv0 = convert_face_uv2_for_lightmap(face.lightmap, face.lightmap_start, face.lightmap_size, face.q3_uv2[vertIndex + 0])
-					var lm_uv1 = convert_face_uv2_for_lightmap(face.lightmap, face.lightmap_start, face.lightmap_size, face.q3_uv2[vertIndex + 1])
-					var lm_uv2 = convert_face_uv2_for_lightmap(face.lightmap, face.lightmap_start, face.lightmap_size, face.q3_uv2[vertIndex + 2])
-					
-					surface_tool.set_material(material)
-					surface_tool.set_normal(face.face_normal)
-					surface_tool.set_uv(uv0)
-					surface_tool.set_uv2(lm_uv0)
-					surface_tool.add_vertex(v0 * unit_scale)
-					surface_tool.set_uv(uv1)
-					surface_tool.set_uv2(lm_uv1)
-					surface_tool.add_vertex(v1 * unit_scale)
-					surface_tool.set_uv(uv2)
-					surface_tool.set_uv2(lm_uv2)
-					surface_tool.add_vertex(v2 * unit_scale)
-				
-	if QBSPi2:
-		for texture in texture_list:
-			texture = texture as BSPTextureInfo
-			
-			if not surface_list.has(texture.texture_path):
-				var st =  SurfaceTool.new()
-				surface_list[texture.texture_path] = st
-				st.begin(Mesh.PRIMITIVE_TRIANGLES)
-
-		for face in face_data:
-			var texture : BSPTextureInfo = texture_list[face.texinfo_id]
-			
-			if surface_list.has(texture.texture_path):
-				var surface_tool : SurfaceTool = surface_list.get(texture.texture_path)
-				var material_info : MaterialInfo = material_info_lookup.get(surface_tool, null)
-				if (!material_info):
-					material_info = load_or_create_material(texture.texture_path)
-					material_info_lookup[surface_tool] = material_info
-				var material := material_info.material
-				var width := material_info.width
-				var height := material_info.height
-				var verts : PackedVector3Array = face.verts
-				var ignore_surface := ignored_flags.has(texture.flags) # Can probably get rid of this once all the normal skipping flags are added
-				if (texture.flags & (SURFACE_FLAG_NODRAW | SURFACE_FLAG_HINT | SURFACE_FLAG_SKIP)):
-					ignore_surface = true
-				if (!include_sky_surfaces && (texture.flags & SURFACE_FLAG_SKY)):
-					ignore_surface = true
-				if (!ignore_surface):
-					for vertIndex in range(0, verts.size(), 3):
-						var v0 = verts[vertIndex + 0]
-						var v1 = verts[vertIndex + 1]
-						var v2 = verts[vertIndex + 2]
-						
-						var uv0 = get_uv_q(v0, texture, width, height)
-						var uv1 = get_uv_q(v1, texture, width, height)
-						var uv2 = get_uv_q(v2, texture, width, height)
-						
-						#var plane = geometry["plane"][face.plane_id] as BSPPlane
-						var normal : Vector3 = (v1 - v0).cross((v0 - v2))#FIXME: planes dont work for quake 2 for some reason, vector calculated by cross product 
-						#var normal : Vector3 = plane.normal
-						
-						surface_tool.set_material(material)
-						surface_tool.set_normal(normal.normalized())
-						surface_tool.set_uv(uv0)
-						surface_tool.add_vertex(v0 * unit_scale)
-						surface_tool.set_uv(uv1)
-						surface_tool.add_vertex(v1 * unit_scale)
-						surface_tool.set_uv(uv2)
-						surface_tool.add_vertex(v2 * unit_scale)
-
-	for tool in surface_list.values():
-		tool = tool as SurfaceTool
-		mesh = tool.commit(mesh) as ArrayMesh
-	prints("\n\n\n QBSPi2 - Completed Mesh With %s Surfaces" % mesh.get_surface_count())
-	if missing_textures.size() > 0: prints(".\nMissing Textures:", missing_textures, "Some Faces may be invisible, Trust me they're there the surface albedo is just 0!")
-	return mesh
-
-
-func get_uv_q(vertex : Vector3, tex_info : BSPTextureInfo, width : float, height : float) -> Vector2:
-	var u := (vertex.dot(tex_info.vec_s) + tex_info.offset_s) / width
-	var v := (vertex.dot(tex_info.vec_t) + tex_info.offset_t) / height
+func get_uv_q2(vertex : Vector3, tex_info : BSPTextureInfo, width : float, height : float) -> Vector2:
+	var u := (vertex.dot(tex_info.vec_s) / unit_scale + tex_info.offset_s) / width
+	var v := (vertex.dot(tex_info.vec_t) / unit_scale + tex_info.offset_t) / height
 	return Vector2(u, v)
 
-
-## converts 2 bytes to a unsigned int16
-func convert_from_uint16(uint16):
-	var uint16_value = uint16.decode_u16(0)
-	if uint16.size() < 4: return 0
-	return uint16_value
-
-
-## converts 4 bytes to a unsigned int32
-func convert_from_uint32(uint32 : PackedByteArray):
-	var uint32_value = uint32.decode_u32(0)
-	if uint32.size() < 4: return 0
-	return uint32_value
-
+func get_uint16(fa: FileAccess) -> int: return unsigned16_to_signed(fa.get_16())
+func get_uint32(fa: FileAccess) -> int: return unsigned32_to_signed(fa.get_32())
 
 ## Non-zero values are true, as do "t" and "y" for "true" and "yes".
 static func convert_string_to_bool(string : String) -> bool:
@@ -2597,11 +1804,419 @@ static func convert_string_to_bool(string : String) -> bool:
 		return true
 	return false
 
+enum {
+	LUMP_OFFSET,
+	LUMP_SIZE
+}
 
-## returns bytes, indices should be an array e.g. [1, 2, 3, 4]
-# TODO: Unoptimal, use slice() directly instead.
-func bytes(input_array : PackedByteArray, indices : Array) -> PackedByteArray:
-	if (indices.size() > 0):
-		return input_array.slice(indices[0], indices[indices.size() - 1] + 1)
-	else:
-		return []
+enum Q2_HEADER {
+	LUMP_ENTITIES,
+	LUMP_PLANE,
+	LUMP_VERTEX,
+	LUMP_VISIBILITY,
+	LUMP_NODE,
+	LUMP_TEXTURE_INFO,
+	LUMP_FACE,
+	LUMP_LIGHTMAP,
+	LUMP_LEAVES,
+	LUMP_LEAF_FACE_TABLE,
+	LUMP_LEAF_BRUSH_TABLE,
+	LUMP_EDGE,
+	LUMP_FACE_EDGE,
+	LUMP_MODEL,
+	LUMP_BRUSH,
+	LUMP_BRUSH_SIDE,
+}
+
+enum Q3_HEADER {
+	LUMP_ENTITIES,
+	LUMP_TEXTURES,
+	LUMP_PLANE,
+	LUMP_NODE,
+	LUMP_LEAF,
+	LUMP_LEAF_FACE,
+	LUMP_LEAF_BRUSH,
+	LUMP_MODEL,
+	LUMP_BRUSH,
+	LUMP_BRUSHSIDES,
+	LUMP_VERTEX,
+	LUMP_MESH_VERTEX,
+	LUMP_EFFECT,
+	LUMP_FACE,
+	LUMP_LIGHTMAP,
+	LUMP_LIGHTVOL,
+	LUMP_VISDATA
+}
+
+var header_data: Dictionary
+
+func read_bsp_q3(file_path: String, file_access: FileAccess) -> Node3D:
+	for i in range(0, Q3_HEADER.size(), 1):
+		header_data[i] = {
+			LUMP_OFFSET: unsigned32_to_signed(file_access.get_32()), 
+			LUMP_SIZE: unsigned32_to_signed(file_access.get_32())
+			}
+	
+	var face_count: int = header_data[Q3_HEADER.LUMP_FACE][LUMP_SIZE] / 104
+	
+	var textures: Dictionary[String, SurfaceTool]
+	
+	for i: int in range(0, face_count, 1):
+		var face := get_face_q3(i, file_access)
+		var texture_address: int = header_data[Q3_HEADER.LUMP_TEXTURES][LUMP_OFFSET] + (face.texture_idx * 72)
+		file_access.seek(texture_address)
+		## why does FileAccess not have a function to get a string length AHHHHHHH - cslr
+		
+		var texture_name: String = file_access.get_buffer(64).get_string_from_ascii() 
+		var flags: int = file_access.get_32()
+		var content_flags: int = file_access.get_32()
+		
+		if not textures.has(texture_name):
+			textures[texture_name] = SurfaceTool.new()
+			textures[texture_name].begin(Mesh.PRIMITIVE_TRIANGLES)
+		
+		var st: SurfaceTool = textures[texture_name]
+		
+		var face_verts: PackedVector3Array
+		var face_normals: PackedVector3Array
+		var face_uvs: PackedVector2Array
+		
+		for j: int in range(face.first_vertex, face.first_vertex+face.num_vertex,1):
+			var vertex_address: int = header_data[Q3_HEADER.LUMP_VERTEX][LUMP_OFFSET] + (j * 44)
+			file_access.seek(vertex_address)
+			
+			var position := convert_vector_from_quake_scaled(Vector3(file_access.get_float(), file_access.get_float(), file_access.get_float()), unit_scale)
+			var texcord := Vector4(file_access.get_float(), file_access.get_float(), file_access.get_float(), file_access.get_float())
+			var normal := convert_vector_from_quake_unscaled(Vector3(file_access.get_float(), file_access.get_float(), file_access.get_float()))
+			var color := Color(file_access.get_8() / 255.0, file_access.get_8() / 255.0, file_access.get_8() / 255.0, file_access.get_8() / 255.0)
+			
+			face_uvs.append(Vector2(texcord.x, texcord.y))
+			face_verts.append(position)
+			face_normals.append(normal)
+		
+		if face.type == 1: # polygon face
+			for k: int in range(face.first_mesh_vertex, face.first_mesh_vertex+face.num_mesh_vertex-1, 3):
+				var mesh_vertex_address: int = header_data[Q3_HEADER.LUMP_MESH_VERTEX][LUMP_OFFSET] + (k * 4)
+				file_access.seek(mesh_vertex_address)
+				var Ia: int = file_access.get_32()
+				var Ib: int = file_access.get_32()
+				var Ic: int = file_access.get_32()
+				
+				var a: Vector3 = face_verts[Ia]
+				var b: Vector3 = face_verts[Ib]
+				var c: Vector3 = face_verts[Ic]
+				
+				st.set_normal(face_normals[Ia])
+				st.set_uv(face_uvs[Ia])
+				st.add_vertex(a)
+				st.set_normal(face_normals[Ib])
+				st.set_uv(face_uvs[Ib])
+				st.add_vertex(b)
+				st.set_normal(face_normals[Ic])
+				st.set_uv(face_uvs[Ic])
+				
+				st.add_vertex(c)
+	
+	var mesh_inst := MeshInstance3D.new()
+	mesh_inst.mesh = ArrayMesh.new()
+	
+	for texture: String in textures.keys():
+		var surface_tool: SurfaceTool = textures[texture]
+		surface_tool.set_material(load_or_create_material(texture).material)
+		surface_tool.commit(mesh_inst.mesh)
+	
+	var sb := StaticBody3D.new()
+	root_node.add_child(sb)
+	sb.owner = root_node
+	
+	var collisions: Array[CollisionShape3D] = make_collisions_q3(file_access)
+	
+	for collision: CollisionShape3D in collisions:
+		sb.add_child(collision)
+		collision.owner = root_node
+	
+	root_node.add_child(mesh_inst)
+	mesh_inst.owner = root_node
+	
+	file_access.seek(header_data[Q3_HEADER.LUMP_ENTITIES][LUMP_OFFSET])
+	var entity_string : String = file_access.get_buffer(header_data[Q3_HEADER.LUMP_ENTITIES][LUMP_SIZE]).get_string_from_ascii()
+	var entity_output = parse_entity_string(entity_string)
+	var parsed = convert_entity_dict_to_scene(entity_output)
+	
+	return root_node
+
+
+func get_face_q3(face_index: int, file_access: FileAccess) -> Q3BSPFace:
+	var face := Q3BSPFace.new()
+	file_access.seek(header_data[Q3_HEADER.LUMP_FACE][LUMP_OFFSET] + (face_index * 104))
+	face.texture_idx = file_access.get_32()
+	face.effect = file_access.get_32()
+	face.type = file_access.get_32()
+	
+	face.first_vertex = file_access.get_32()
+	face.num_vertex = file_access.get_32()
+	
+	face.first_mesh_vertex = file_access.get_32()
+	face.num_mesh_vertex = file_access.get_32()
+	
+	face.lightmap_index = file_access.get_32()
+	
+	face.lightmap_start = Vector2(file_access.get_32(), file_access.get_32())
+	face.lightmap_size = Vector2(file_access.get_32(), file_access.get_32())
+	
+	
+	face.lightmap_origin = Vector3(file_access.get_float(), file_access.get_float(), file_access.get_float())
+	
+	face.lightmap_vec_s = Vector3(file_access.get_float(), file_access.get_float(), file_access.get_float())
+	face.lightmap_vec_t = Vector3(file_access.get_float(), file_access.get_float(), file_access.get_float())
+	
+	face.normal = Vector3(file_access.get_float(), file_access.get_float(), file_access.get_float())
+	
+	face.patch_size = Vector2(file_access.get_32(), file_access.get_32())
+	
+	return face
+
+
+func make_collisions_q3(file_access: FileAccess) -> Array[CollisionShape3D]:
+	var collisions : Array[CollisionShape3D] = []
+	file_access.seek(header_data[Q3_HEADER.LUMP_BRUSH][LUMP_OFFSET])
+	
+	var brush_count: int = header_data[Q3_HEADER.LUMP_BRUSH][LUMP_SIZE] / 12
+	
+	for i: int in range(0, brush_count, 1):
+		file_access.seek(header_data[Q3_HEADER.LUMP_BRUSH][LUMP_OFFSET] + (i * 12))
+		var first_brush_side: int = file_access.get_32()
+		var num_brush_side: int = file_access.get_32()
+		var b_texture_idx: int = file_access.get_32()
+		var brush_planes: Array[Plane]
+		
+		for j: int in range(first_brush_side, first_brush_side+num_brush_side, 1):
+			var brush_side_offset: int = header_data[Q3_HEADER.LUMP_BRUSHSIDES][LUMP_OFFSET] + (j*8)
+			file_access.seek(brush_side_offset)
+			var plane_idx: int = file_access.get_32()
+			var bs_texture_idx: int = file_access.get_32()
+			var plane_offset: int = header_data[Q3_HEADER.LUMP_PLANE][LUMP_OFFSET] + plane_idx * 16
+			file_access.seek(plane_offset)
+			
+			var normal: Vector3 = read_vector_convert_unscaled(file_access)
+			var distance: float = file_access.get_float() * unit_scale
+			brush_planes.append(Plane(normal, distance))
+		
+		
+		var verts := Geometry3D.compute_convex_mesh_points(brush_planes)
+		var collision := ConvexPolygonShape3D.new()
+		var collision_shape := CollisionShape3D.new()
+		
+		collision.set_points(verts)
+		
+		collision_shape.shape = collision
+		collisions.append(collision_shape)
+		collision_shape.set_name(str("collision_brush_%s" % i))
+	return collisions
+
+
+func read_bsp_q2(file_path: String, file_access: FileAccess) -> Node3D:
+	for i in range(0, Q2_HEADER.size(), 1):
+		header_data[i] = {
+			LUMP_OFFSET: unsigned32_to_signed(file_access.get_32()),
+			LUMP_SIZE: unsigned32_to_signed(file_access.get_32())
+			}
+	
+	var mi := MeshInstance3D.new()
+	mi.mesh = ArrayMesh.new()
+	var surfaces: Dictionary
+	var surface_materials: Dictionary
+	
+	for f: int in range(0, header_data[Q2_HEADER.LUMP_FACE][LUMP_SIZE] / 20, 1):
+		var face: BSPFace = get_face_q2(f, file_access)
+		var texture_info: BSPTextureInfo = face.texture_info
+		var st : SurfaceTool
+		var material_info : MaterialInfo
+		
+		if surfaces.has(texture_info.texture_path):
+			st = surfaces[texture_info.texture_path]
+			material_info = surface_materials[texture_info.texture_path]
+		else:
+			st = SurfaceTool.new()
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			material_info = load_or_create_material(texture_info.texture_path)
+			surfaces[texture_info.texture_path] = st
+			surface_materials[texture_info.texture_path] = material_info
+		
+		var verts: PackedVector3Array = face.verts
+		var material := material_info.material
+		var width := material_info.width
+		var height := material_info.height
+		
+		for vi in range(0, verts.size()-1, 1):
+			var a: Vector3 = verts[0]
+			var b: Vector3 = verts[vi]
+			var c: Vector3 = verts[vi+1]
+			
+			st.set_normal((c-a).cross(b-a).normalized())
+			st.set_uv(get_uv_q2(a, texture_info, width, height))
+			
+			st.add_vertex(a)
+			st.set_uv(get_uv_q2(b, texture_info, width, height))
+			
+			st.add_vertex(b)
+			
+			st.set_uv(get_uv_q2(c, texture_info, width, height))
+			st.add_vertex(c)
+	
+	for key in surfaces:
+		var material_info: MaterialInfo = surface_materials[key]
+		var st: SurfaceTool = surfaces[key]
+		st.set_material(material_info.material)
+		st.commit(mi.mesh)
+	
+	root_node.add_child(mi)
+	mi.owner = root_node
+	
+	var sb := StaticBody3D.new()
+	root_node.add_child(sb)
+	sb.owner = root_node
+	
+	var collisions: Array[CollisionShape3D] = make_collisions_q2(file_access)
+	
+	for collision: CollisionShape3D in collisions:
+		sb.add_child(collision)
+		collision.owner = root_node
+	
+	file_access.seek(header_data[Q2_HEADER.LUMP_ENTITIES][LUMP_OFFSET])
+	var entity_string : String = file_access.get_buffer(header_data[Q2_HEADER.LUMP_ENTITIES][LUMP_SIZE]).get_string_from_ascii()
+	var entity_output = parse_entity_string(entity_string)
+	var parsed = convert_entity_dict_to_scene(entity_output)
+	
+	return root_node
+
+func get_face_q2(face_index: int, file_access: FileAccess) -> BSPFace:
+	#region face lump
+	var f_lump_start: int = header_data[Q2_HEADER.LUMP_FACE][LUMP_OFFSET]
+	var f_index_offset: int = 20 * (face_index+1)
+	file_access.seek(f_lump_start + f_index_offset)
+	
+	var f_plane: int = get_uint16(file_access)
+	var f_plane_side: int = get_uint16(file_access)
+	
+	var f_first_edge: int = get_uint32(file_access)
+	var f_num_edges: int = get_uint16(file_access)
+	
+	var f_texture_idx: int = get_uint16(file_access)
+	
+	## lightmap info!
+	
+	var lightmap_styles: PackedByteArray = file_access.get_buffer(4)
+	var lightmap_offset: int = get_uint32(file_access)
+	#endregion
+	
+	#region read face edges
+	
+	var fe_lump_start: int = header_data[Q2_HEADER.LUMP_FACE_EDGE][LUMP_OFFSET]
+	var fe_first: int = f_first_edge * 4
+	
+	file_access.seek(fe_lump_start + fe_first)
+	
+	var face_edges: PackedInt64Array
+	
+	for i: int in range(0, f_num_edges, 1): face_edges.append(get_uint32(file_access))
+	
+	#endregion
+	
+	#region read edges and pull verts
+	var e_lump_start: int = header_data[Q2_HEADER.LUMP_EDGE][LUMP_OFFSET]
+	var v_lump_start: int = header_data[Q2_HEADER.LUMP_VERTEX][LUMP_OFFSET]
+	
+	var e_verts: PackedVector3Array
+	var e_uv: PackedVector2Array
+	
+	for edge: int in face_edges:
+		var abs_idx: int = abs(edge) * 4
+		file_access.seek(e_lump_start + abs_idx)
+		
+		var v_idx_a: int = get_uint16(file_access)
+		var v_idx_b: int = get_uint16(file_access)
+		
+		file_access.seek(v_lump_start + v_idx_a * 12)
+		
+		var vec_a: Vector3 = convert_vector_from_quake_scaled(Vector3(file_access.get_float(), file_access.get_float(), file_access.get_float()), unit_scale)
+		
+		file_access.seek(v_lump_start + v_idx_b * 12)
+		
+		var vec_b: Vector3 = convert_vector_from_quake_scaled(Vector3(file_access.get_float(), file_access.get_float(), file_access.get_float()), unit_scale)
+		
+		e_verts.append(vec_a if edge > 0 else vec_b)
+		e_verts.append(vec_a if edge < 0 else vec_b)
+	#endregion
+	
+	#region get texture information
+	var ti_lump_start: int = header_data[Q2_HEADER.LUMP_TEXTURE_INFO][LUMP_OFFSET]
+	var ti_index_offset: int = f_texture_idx * 76
+	
+	file_access.seek(ti_lump_start + ti_index_offset)
+	
+	var tex_info := BSPTextureInfo.new()
+	
+	tex_info.vec_s = convert_vector_from_quake_unscaled(Vector3(file_access.get_float(), file_access.get_float(), file_access.get_float()))
+	tex_info.offset_s = file_access.get_float()
+	
+	tex_info.vec_t = convert_vector_from_quake_unscaled(Vector3(file_access.get_float(), file_access.get_float(), file_access.get_float()))
+	tex_info.offset_t = file_access.get_float()
+	
+	tex_info.flags = get_uint32(file_access)
+	tex_info.value = get_uint32(file_access)
+	
+	tex_info.texture_path = file_access.get_buffer(32).get_string_from_ascii()
+	
+	var next: int = get_uint32(file_access)
+	#endregion
+	
+	var compiled_face := BSPFace.new()
+	compiled_face.verts = e_verts
+	
+	compiled_face.texture_info = tex_info
+	compiled_face.plane_id = f_plane
+	compiled_face.plane_side = f_plane_side
+	
+	return compiled_face
+
+func make_collisions_q2(file_access: FileAccess) -> Array[CollisionShape3D]:
+	var collisions: Array[CollisionShape3D]
+	var b_lump_start: int = header_data[Q2_HEADER.LUMP_BRUSH][LUMP_OFFSET]
+	var brush_count: int = header_data[Q2_HEADER.LUMP_BRUSH][LUMP_SIZE] / 12
+	
+	var bs_lump_start: int = header_data[Q2_HEADER.LUMP_BRUSH_SIDE][LUMP_OFFSET]
+	var p_lump_start: int = header_data[Q2_HEADER.LUMP_PLANE][LUMP_OFFSET]
+	
+	for idx: int in range(0, brush_count, 1):
+		file_access.seek(b_lump_start + idx * 12)
+		var first_side: int = get_uint32(file_access)
+		var num_sides: int = get_uint32(file_access)
+		var flags: int = get_uint32(file_access)
+		
+		var brush_planes: Array[Plane]
+		for sidx: int in range(first_side, first_side+num_sides, 1):
+			file_access.seek(bs_lump_start + (sidx * 4))
+			
+			var plane_idx: int = get_uint16(file_access)
+			var texture_info: int = file_access.get_16() # from old q2 import code, why is this called texture_info ????
+			
+			file_access.seek(p_lump_start + plane_idx * 20)
+			
+			var normal: Vector3 = convert_vector_from_quake_unscaled(Vector3(file_access.get_float(), file_access.get_float(), file_access.get_float()))
+			var distance: float = file_access.get_float() * unit_scale
+			var type: int = get_uint32(file_access)
+			
+			brush_planes.append(Plane(normal, distance))
+		
+		
+		var verts := Geometry3D.compute_convex_mesh_points(brush_planes)
+		var collision := ConvexPolygonShape3D.new()
+		var collision_shape := CollisionShape3D.new()
+		
+		collision.set_points(verts)
+		
+		collision_shape.shape = collision
+		collisions.append(collision_shape)
+		collision_shape.set_name(str("collision_brush_%s"%idx))
+	return collisions
