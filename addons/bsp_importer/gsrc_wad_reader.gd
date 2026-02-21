@@ -84,7 +84,7 @@ func create_resources():
 		
 		match entry.type:
 			67: # Miptex Image.
-				load_texture(entry, "res://textures/", false)
+				resources[entry.name]["texture"] = load_texture(entry, "res://textures/", false)
 
 func load_texture(entry : Dictionary, save_path : String, save_to_file := false) -> ImageTexture:
 	var offset = entry.offset

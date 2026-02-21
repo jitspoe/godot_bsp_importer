@@ -188,6 +188,32 @@ class BSPTextureInfo:
 		return get_data_size()
 
 
+## quake 3 has a lot of stuff i couldn't cleanly integrate into the BSPFace class - cslr
+class Q3BSPFace:
+	
+	var texture_idx: int
+	var effect: int
+	var type: int
+	
+	var first_vertex: int
+	var num_vertex: int
+	
+	var first_mesh_vertex: int
+	var num_mesh_vertex: int
+	
+	var lightmap_index: int
+	
+	var lightmap_start: Vector2
+	var lightmap_size: Vector2
+	
+	var lightmap_origin: Vector3
+	
+	var lightmap_vec_s: Vector3
+	var lightmap_vec_t: Vector3
+	
+	var normal: Vector3
+	var patch_size: Vector2
+
 class BSPFace:
 	var plane_id : int
 	var plane_side : int
@@ -386,13 +412,12 @@ func read_bsp(source_file : String) -> Node:
 	is_gsrc = (bsp_version == 30) # check if its goldsrc so it doesn't try to look for textures in WADs for non-goldsrc formats.
 	
 	if is_gsrc:
-		print("Hey look it's a Goldsrc BSP File! these are broken.")
-		#create_wad_table()
-		has_textures = false
+		#print("Hey look it's a Goldsrc BSP File! these are broken.")
+		create_wad_table()
 		
-		file.close()
-		file = null
-		return
+		#file.close()
+		#file = null
+		#return
 		
 	
 	if (bsp_version == 1347633737): # "IBSP" - Quake 2/3 BSP format
@@ -406,18 +431,19 @@ func read_bsp(source_file : String) -> Node:
 		print("BSP sub-version: %d\n" % bsp_subversion)
 		
 		if bsp_subversion == 38:
-			prints("quake 2 bsp")
 			
 			var node := read_bsp_q2(source_file, file)
 			
 			file.close()
 			file = null 
 			return node
+		
 		elif bsp_subversion == 46:
-			prints("quake 3 bsp")
+			var node := read_bsp_q3(source_file, file)
+			
 			file.close()
-			file = null
-			return
+			file = null 
+			return node
 		file.close()
 		file = null
 		return
@@ -1447,15 +1473,15 @@ func convert_planes_to_points(convex_planes : Array[Plane]) -> PackedVector3Arra
 
 func create_wad_table():
 	pass
-	#var wad_path = texture_path_pattern.replace("{texture_name}.png",  "wad/")
-	#if not DirAccess.dir_exists_absolute(wad_path): DirAccess.make_dir_recursive_absolute(wad_path)
-	#var files_in_dir = DirAccess.get_files_at(wad_path)
-	#
-	#for file in files_in_dir:
-		#if file.get_extension() == "wad":
-			#var w : WADReaderGSrc = load(wad_path + file).instantiate()
-			#wad_paths.append(w)
-			#prints("loading gsrc wad", w)
+	var wad_path = texture_path_pattern.replace("{texture_name}.png",  "wad/")
+	if not DirAccess.dir_exists_absolute(wad_path): DirAccess.make_dir_recursive_absolute(wad_path)
+	var files_in_dir = DirAccess.get_files_at(wad_path)
+	
+	for file in files_in_dir:
+		if file.get_extension() == "wad":
+			var w : WADReaderGSrc = load(wad_path + file).instantiate()
+			wad_paths.append(w)
+			prints("loading gsrc wad", w)
 
 # BSPTexture is optional, for handling Q1 BSP files that have textures embedded.
 func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null) -> MaterialInfo:
@@ -1490,8 +1516,34 @@ func load_or_create_material(name : StringName, bsp_texture : BSPTexture = null)
 			width = texture.get_width()
 			height = texture.get_height()
 			#print(name, ": External image width: ", width, " height: ", height)
-	elif (!ResourceLoader.exists(image_path) && !is_gsrc):
+	elif (!ResourceLoader.exists(image_path)):
 		print("Could not load ", original_image_path)
+		if is_gsrc:
+				var found_texture: bool
+				for wad in wad_paths:
+					var n = name.to_lower()
+					if wad.resources.has(n):
+						var struct = wad.resources.get(n)
+						texture = wad.load_texture(struct, texture_path_pattern.replace("{texture_name}", struct.get("name")), true)
+						found_texture = true
+				if not found_texture:
+					# bit ugly but because gsrc has to load from wads we need to do this early exit so the bsp importer doesnt read garbage data.
+					material = StandardMaterial3D.new()
+					material.albedo_color = Color(randf_range(0.0, 1.0), randf_range(0.0, 1.0), randf_range(0.0, 1.0))
+					var material_info := MaterialInfo.new()
+					material_info.material = material
+					material_info.width = width
+					material_info.height = height
+					return material_info
+	
+		# finally, check for if it is goldsrc to read the wad.
+	# this code is pretty sucky wucky :-( probably better for memory management
+	if (!ResourceLoader.exists(image_path) && is_gsrc):
+		for wad in wad_paths:
+			var n = name.to_lower()
+			if wad.resources.has(n):
+				var struct = wad.resources.get(n)
+				texture = wad.load_texture(struct, texture_path_pattern.replace("{texture_name}", struct.get("name")), true)
 	
 	var image_emission_path : String
 	image_emission_path = texture_emission_path_pattern.replace("{texture_name}", name)
@@ -1747,12 +1799,197 @@ enum Q2_HEADER {
 	LUMP_BRUSH_SIDE,
 }
 
+enum Q3_HEADER {
+	LUMP_ENTITIES,
+	LUMP_TEXTURES,
+	LUMP_PLANE,
+	LUMP_NODE,
+	LUMP_LEAF,
+	LUMP_LEAF_FACE,
+	LUMP_LEAF_BRUSH,
+	LUMP_MODEL,
+	LUMP_BRUSH,
+	LUMP_BRUSHSIDES,
+	LUMP_VERTEX,
+	LUMP_MESH_VERTEX,
+	LUMP_EFFECT,
+	LUMP_FACE,
+	LUMP_LIGHTMAP,
+	LUMP_LIGHTVOL,
+	LUMP_VISDATA
+}
+
 var header_data: Dictionary
+
+func read_bsp_q3(file_path: String, file_access: FileAccess) -> Node3D:
+	for i in range(0, Q3_HEADER.size(), 1):
+		header_data[i] = {
+			LUMP_OFFSET: unsigned32_to_signed(file_access.get_32()), 
+			LUMP_SIZE: unsigned32_to_signed(file_access.get_32())
+			}
+	
+	var face_count: int = header_data[Q3_HEADER.LUMP_FACE][LUMP_SIZE] / 104
+	
+	var textures: Dictionary[String, SurfaceTool]
+	
+	for i: int in range(0, face_count, 1):
+		var face := get_face_q3(i, file_access)
+		var texture_address: int = header_data[Q3_HEADER.LUMP_TEXTURES][LUMP_OFFSET] + (face.texture_idx * 72)
+		file_access.seek(texture_address)
+		## why does FileAccess not have a function to get a string length AHHHHHHH - cslr
+		
+		var texture_name: String = file_access.get_buffer(64).get_string_from_ascii() 
+		var flags: int = file_access.get_32()
+		var content_flags: int = file_access.get_32()
+		
+		if not textures.has(texture_name):
+			textures[texture_name] = SurfaceTool.new()
+			textures[texture_name].begin(Mesh.PRIMITIVE_TRIANGLES)
+		
+		var st: SurfaceTool = textures[texture_name]
+		
+		var face_verts: PackedVector3Array
+		var face_normals: PackedVector3Array
+		var face_uvs: PackedVector2Array
+		
+		for j: int in range(face.first_vertex, face.first_vertex+face.num_vertex,1):
+			var vertex_address: int = header_data[Q3_HEADER.LUMP_VERTEX][LUMP_OFFSET] + (j * 44)
+			file_access.seek(vertex_address)
+			
+			var position := convert_vector_from_quake_scaled(Vector3(file_access.get_float(), file_access.get_float(), file_access.get_float()), unit_scale)
+			var texcord := Vector4(file_access.get_float(), file_access.get_float(), file_access.get_float(), file_access.get_float())
+			var normal := convert_vector_from_quake_unscaled(Vector3(file_access.get_float(), file_access.get_float(), file_access.get_float()))
+			var color := Color(file_access.get_8() / 255.0, file_access.get_8() / 255.0, file_access.get_8() / 255.0, file_access.get_8() / 255.0)
+			
+			face_uvs.append(Vector2(texcord.x, texcord.y))
+			face_verts.append(position)
+			face_normals.append(normal)
+		
+		if face.type == 1: # polygon face
+			for k: int in range(face.first_mesh_vertex, face.first_mesh_vertex+face.num_mesh_vertex-1, 3):
+				var mesh_vertex_address: int = header_data[Q3_HEADER.LUMP_MESH_VERTEX][LUMP_OFFSET] + (k * 4)
+				file_access.seek(mesh_vertex_address)
+				var Ia: int = file_access.get_32()
+				var Ib: int = file_access.get_32()
+				var Ic: int = file_access.get_32()
+				
+				var a: Vector3 = face_verts[Ia]
+				var b: Vector3 = face_verts[Ib]
+				var c: Vector3 = face_verts[Ic]
+				
+				st.set_normal(face_normals[Ia])
+				st.set_uv(face_uvs[Ia])
+				st.add_vertex(a)
+				st.set_normal(face_normals[Ib])
+				st.set_uv(face_uvs[Ib])
+				st.add_vertex(b)
+				st.set_normal(face_normals[Ic])
+				st.set_uv(face_uvs[Ic])
+				
+				st.add_vertex(c)
+	
+	var mesh_inst := MeshInstance3D.new()
+	mesh_inst.mesh = ArrayMesh.new()
+	
+	for texture: String in textures.keys():
+		var surface_tool: SurfaceTool = textures[texture]
+		surface_tool.set_material(load_or_create_material(texture).material)
+		surface_tool.commit(mesh_inst.mesh)
+	
+	var sb := StaticBody3D.new()
+	root_node.add_child(sb)
+	sb.owner = root_node
+	
+	var collisions: Array[CollisionShape3D] = make_collisions_q3(file_access)
+	
+	for collision: CollisionShape3D in collisions:
+		sb.add_child(collision)
+		collision.owner = root_node
+	
+	root_node.add_child(mesh_inst)
+	mesh_inst.owner = root_node
+	
+	file_access.seek(header_data[Q3_HEADER.LUMP_ENTITIES][LUMP_OFFSET])
+	var entity_string : String = file_access.get_buffer(header_data[Q3_HEADER.LUMP_ENTITIES][LUMP_SIZE]).get_string_from_ascii()
+	var entity_output = parse_entity_string(entity_string)
+	var parsed = convert_entity_dict_to_scene(entity_output)
+	
+	return root_node
+
+
+func get_face_q3(face_index: int, file_access: FileAccess) -> Q3BSPFace:
+	var face := Q3BSPFace.new()
+	file_access.seek(header_data[Q3_HEADER.LUMP_FACE][LUMP_OFFSET] + (face_index * 104))
+	face.texture_idx = file_access.get_32()
+	face.effect = file_access.get_32()
+	face.type = file_access.get_32()
+	
+	face.first_vertex = file_access.get_32()
+	face.num_vertex = file_access.get_32()
+	
+	face.first_mesh_vertex = file_access.get_32()
+	face.num_mesh_vertex = file_access.get_32()
+	
+	face.lightmap_index = file_access.get_32()
+	
+	face.lightmap_start = Vector2(file_access.get_32(), file_access.get_32())
+	face.lightmap_size = Vector2(file_access.get_32(), file_access.get_32())
+	
+	
+	face.lightmap_origin = Vector3(file_access.get_float(), file_access.get_float(), file_access.get_float())
+	
+	face.lightmap_vec_s = Vector3(file_access.get_float(), file_access.get_float(), file_access.get_float())
+	face.lightmap_vec_t = Vector3(file_access.get_float(), file_access.get_float(), file_access.get_float())
+	
+	face.normal = Vector3(file_access.get_float(), file_access.get_float(), file_access.get_float())
+	
+	face.patch_size = Vector2(file_access.get_32(), file_access.get_32())
+	
+	return face
+
+
+func make_collisions_q3(file_access: FileAccess) -> Array[CollisionShape3D]:
+	var collisions : Array[CollisionShape3D] = []
+	file_access.seek(header_data[Q3_HEADER.LUMP_BRUSH][LUMP_OFFSET])
+	
+	var brush_count: int = header_data[Q3_HEADER.LUMP_BRUSH][LUMP_SIZE] / 12
+	
+	for i: int in range(0, brush_count, 1):
+		file_access.seek(header_data[Q3_HEADER.LUMP_BRUSH][LUMP_OFFSET] + (i * 12))
+		var first_brush_side: int = file_access.get_32()
+		var num_brush_side: int = file_access.get_32()
+		var b_texture_idx: int = file_access.get_32()
+		var brush_planes: Array[Plane]
+		
+		for j: int in range(first_brush_side, first_brush_side+num_brush_side, 1):
+			var brush_side_offset: int = header_data[Q3_HEADER.LUMP_BRUSHSIDES][LUMP_OFFSET] + (j*8)
+			file_access.seek(brush_side_offset)
+			var plane_idx: int = file_access.get_32()
+			var bs_texture_idx: int = file_access.get_32()
+			var plane_offset: int = header_data[Q3_HEADER.LUMP_PLANE][LUMP_OFFSET] + plane_idx * 16
+			file_access.seek(plane_offset)
+			
+			var normal: Vector3 = read_vector_convert_unscaled(file_access)
+			var distance: float = file_access.get_float() * unit_scale
+			brush_planes.append(Plane(normal, distance))
+		
+		
+		var verts := Geometry3D.compute_convex_mesh_points(brush_planes)
+		var collision := ConvexPolygonShape3D.new()
+		var collision_shape := CollisionShape3D.new()
+		
+		collision.set_points(verts)
+		
+		collision_shape.shape = collision
+		collisions.append(collision_shape)
+		collision_shape.set_name(str("collision_brush_%s" % i))
+	return collisions
+
 
 func read_bsp_q2(file_path: String, file_access: FileAccess) -> Node3D:
 	for i in range(0, Q2_HEADER.size(), 1):
 		header_data[i] = {
-			LUMP_OFFSET: unsigned32_to_signed(file_access.get_32()), 
+			LUMP_OFFSET: unsigned32_to_signed(file_access.get_32()),
 			LUMP_SIZE: unsigned32_to_signed(file_access.get_32())
 			}
 	
@@ -1921,7 +2158,6 @@ func make_collisions_q2(file_access: FileAccess) -> Array[CollisionShape3D]:
 	
 	var bs_lump_start: int = header_data[Q2_HEADER.LUMP_BRUSH_SIDE][LUMP_OFFSET]
 	var p_lump_start: int = header_data[Q2_HEADER.LUMP_PLANE][LUMP_OFFSET]
-	
 	
 	for idx: int in range(0, brush_count, 1):
 		file_access.seek(b_lump_start + idx * 12)
