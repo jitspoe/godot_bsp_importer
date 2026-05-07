@@ -8,13 +8,20 @@ class_name BSPImporterPlugin
 const USE_PRESET_RESOURCE := false
 var last_selected_file := "" # used for differenciating in stuffwha
 
+
 func _get_importer_name():
 	return "bsp"
 
+
 func _get_visible_name():
 	match last_selected_file.get_extension().to_lower():
-		"bsp": return "Quake BSP"
-		"wad": return "WAD Container"
+		"bsp":
+			return "Quake BSP"
+		"wad":
+			return "WAD Container"
+		_:
+			return "UNKNOWN EXTENSION" # Should never happen, but the compiler complains.
+
 
 func _get_recognized_extensions():
 	return ["bsp", "wad"]
