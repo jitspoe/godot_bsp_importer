@@ -1022,8 +1022,7 @@ func read_bsp(source_file : String) -> Node:
 				var has_nocull_materials := false
 				for texture_name in surface_tools:
 					var surf_tool : SurfaceTool = surface_tools[texture_name]
-					if (use_vertex_normal_array): # Use tangents from BSP2 if we can, since Godot can be buggy with this.
-						
+					if (false):#use_vertex_normal_array): # Use tangents from BSP2 if we can, since Godot can be buggy with this.
 						pass
 					else:
 						surf_tool.generate_tangents()
@@ -1116,10 +1115,11 @@ func read_bsp(source_file : String) -> Node:
 		if (!name_to_node_map.has(parent_name)):
 			printerr("Entity requested parent of name ", parent_name, " but no node with that name was found.")
 		else:
-			#print("Changed parent to ", parent_name)
+			# Keyword change_parent, change parent, reparent, remove_child, add_child
 			var new_parent := name_to_node_map[parent_name]
-			node.get_parent().remove_child(node)
-			new_parent.add_child(node)
+			var parent_inv_transform := Transform3D(new_parent.transform.basis.inverse(), Vector3.ZERO)
+			node.reparent(new_parent, false) # Keeping the transform doesn't work when in tool mode as they aren't in an active scene. :(
+			node.transform = parent_inv_transform * node.transform
 
 	# Run post-import functions
 	if (post_import_script_path):
