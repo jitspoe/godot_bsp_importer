@@ -911,6 +911,11 @@ func read_bsp(source_file : String) -> Node:
 				face_verts.resize(bsp_face.num_edges)
 				var face_normals : PackedVector3Array
 				face_normals.resize(bsp_face.num_edges)
+				var face_tangents : PackedVector3Array
+				var face_bitangents : PackedVector3Array
+				if (use_vertex_normal_array):
+					face_tangents.resize(bsp_face.num_edges)
+					face_bitangents.resize(bsp_face.num_edges)
 				var face_normal := Vector3.UP
 				if (bsp_face.plane_id < plane_normals.size()):
 					face_normal = plane_normals[bsp_face.plane_id]
@@ -958,6 +963,8 @@ func read_bsp(source_file : String) -> Node:
 					face_verts[i] = vert
 					if (use_vertex_normal_array):
 						face_normals[i] = vertex_normal_values[vertex_normal_indexes[edge_list_index * 3]] # Need to multiply by 3 here because the indexes store normal, tangent, binormal
+						face_tangents[i] = vertex_normal_values[vertex_normal_indexes[edge_list_index * 3 + 1]]
+						face_bitangents[i] = vertex_normal_values[vertex_normal_indexes[edge_list_index * 3 + 2]]
 					else:
 						face_normals[i] = face_normal
 					face_uvs[i].x = vert.dot(vs) * tex_scale_x + s / tex_width
@@ -1015,7 +1022,11 @@ func read_bsp(source_file : String) -> Node:
 				var has_nocull_materials := false
 				for texture_name in surface_tools:
 					var surf_tool : SurfaceTool = surface_tools[texture_name]
-					surf_tool.generate_tangents()
+					if (use_vertex_normal_array): # Use tangents from BSP2 if we can, since Godot can be buggy with this.
+						
+						pass
+					else:
+						surf_tool.generate_tangents()
 					if (culling_textures_exclude.has(texture_name)):
 						#array_mesh_no_cull = surf_tool.commit(array_mesh_no_cull)
 						has_nocull_materials = true
